@@ -1,0 +1,19 @@
+# Example: enable local Chromium (Playwright) browser automation.
+#
+# 1. Install the package next to your DSH deployment (same node_modules tree):
+#
+#       npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
+#       npx playwright install chromium        # one-time Chromium download
+#
+# 2. Add a row to your deployment's cordis.yml (or an overlay applied with
+#    `dsh --patch ...`).
+#
+- id: web-browser
+  name: 'dsh-web-browser'
+  config:
+    tool: true                  # register the browser_* tools
+    headless: true              # run without a visible window
+    approval: never             # never | navigate | all (when to ask the user)
+    # timeoutMs: 30000          # per-action deadline (ms)
+    # maxTextLength: 100000     # snapshot visible-text bound (chars)
+    # maxElements: 200          # snapshot interactive-element bound

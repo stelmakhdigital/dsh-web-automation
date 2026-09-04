@@ -1,0 +1,43 @@
+# Example: enable the local web stack in a DeepSeek Harness deployment.
+#
+# 1. Install the package next to your DSH deployment (same node_modules tree),
+#    e.g. from this GitHub repo:
+#
+#       npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git
+#
+# 2. Add a row to your deployment's cordis.yml (or an overlay applied with
+#    `dsh --patch ...`). Every field is defaulted, so an empty config enables
+#    the full local web stack with the keyless engines (DuckDuckGo + Bing).
+#
+- id: web-automation
+  name: 'dsh-web-automation'
+  config:
+    search:
+      engines: [ddg, bing, exa, deepseek, jina]   # tried in this order
+      mode: fallback            # fallback = first success wins; fuse = parallel + RRF merge
+      region: ''                # region/market hint (DDG kl, Bing setmkt)
+      enrich: true              # enrich top results with fetched page text + BM25 re-rank
+      # Per-engine API keys (opt-in; keyless engines need none):
+      # exa:      { apiKeyEnv: EXA_API_KEY }        # or apiKey: '...'
+      # deepseek: { apiKeyEnv: DEEPSEEK_API_KEY }
+      # jina:     { apiKeyEnv: JINA_API_KEY }
+    fetch:
+      revalidate: true          # conditional revalidation for fresh-but-expired pages
+      # cacheTtlMs: 21600000    # page cache TTL (6 h)
+    platforms:
+      tool: true                # register web_platform_search
+      maxResults: 20            # cap on sources per call
+      # timeoutMs: 30000        # per-search deadline (ms)
+      # maxBytes: 5242880       # cap on one fetched body (bytes)
+      # platforms:              # override built-ins by id, or add new platforms
+      #   - id: my-site
+      #     name: My Site
+      #     format: json
+      #     searchUrl: 'https://my-site.example/search?q={query}'
+      #     fields: { items: 'data.results', url: 'link', title: 'title' }
+      # rulePackPaths:          # versioned rule-pack JSON files (hot-reloaded by mtime)
+      #   - '$DSH_HOME/web-platforms/packs.json'
+    history:
+      history: true             # register web_history
+      cacheClear: true          # register web_cache_clear
+      stats: true               # register web_search_stats

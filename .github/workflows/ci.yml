@@ -29,7 +29,10 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        # --legacy-peer-deps: the @deepseek-ai/* peer deps are provided by the
+        # host DSH at runtime; in CI they are absent, so skip peer resolution
+        # and install only the dev deps (esbuild, typescript) + cheerio.
+        run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Build core (dsh-web-automation)
         run: npm run build
@@ -60,10 +63,10 @@ jobs:
 
       - name: Install dependencies + peer types
         run: |
-          npm install --no-audit --no-fund
+          npm install --legacy-peer-deps --no-audit --no-fund
           # Peer deps are provided by the host DSH at runtime; for typecheck we
           # install the published versions so tsc can resolve their types.
-          npm install --no-save --no-audit --no-fund \
+          npm install --no-save --legacy-peer-deps --no-audit --no-fund \
             @deepseek-ai/cordis \
             @deepseek-ai/schemastery \
             @deepseek-ai/dsh-web \

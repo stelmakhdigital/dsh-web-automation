@@ -107,7 +107,7 @@ export function apply(ctx: Context, config: Config): void {
   // re-registration here.
   let current: () => Config = () => config
   installSettingsSection(ctx, WEB_BROWSER_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source) => {
+    setSource: (source: () => Config) => {
       current = source
     },
     onChange: () => {},

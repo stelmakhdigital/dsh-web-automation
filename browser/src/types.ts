@@ -104,7 +104,7 @@ export interface BrowserScreenshotOptions {
 
 /** A captured screenshot (PNG bytes). */
 export interface BrowserScreenshot {
-  readonly buffer: Uint8Array
+  readonly buffer: Buffer
   readonly mimeType: 'image/png'
 }
 

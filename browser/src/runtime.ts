@@ -8,7 +8,7 @@
  * @module @deepseek-ai/dsh-web-browser/runtime
  */
 
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { BrowserOpenOptions, BrowserProvider, BrowserSession } from './types.ts'
 import { BrowserError, BROWSER_CODES } from './types.ts'

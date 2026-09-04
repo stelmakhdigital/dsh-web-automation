@@ -29,7 +29,8 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p browser/tsconfig.json --noEmit"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",

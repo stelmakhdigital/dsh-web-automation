@@ -158,7 +158,7 @@ class PlaywrightSession implements BrowserSession {
       },
       INTERACTIVE_SELECTOR,
     )
-    const elements: BrowserElement[] = data.elements.slice(0, maxElements).map((el, i) => ({
+    const elements: BrowserElement[] = data.elements.slice(0, maxElements).map((el: BrowserElement, i: number) => ({
       ref: `@e${i + 1}`,
       role: el.role,
       name: el.name,

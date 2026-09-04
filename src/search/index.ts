@@ -133,7 +133,7 @@ export interface Config {
    * When set, enrichment uses cosine similarity instead of BM25. Falls back to
    * BM25 when the endpoint is unreachable.
    */
-  embedding?: { endpoint?: string; model?: string }
+  embedding?: { endpoint: string; model: string }
 }
 
 export const Config: z<Config> = z.object({
@@ -224,7 +224,7 @@ export function apply(ctx: Context, config: Config): void {
   // the current section, so a committed change needs no re-registration here.
   let current: () => Config = () => config
   installSettingsSection(ctx, WEB_SEARCH_MULTI_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source) => {
+    setSource: (source: () => Config) => {
       current = source
     },
     onChange: () => {},

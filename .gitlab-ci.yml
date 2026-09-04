@@ -1,25 +1,41 @@
 # GitLab CI for dsh-web-automation.
 #
 # Stages:
-#   1. build — esbuild (core + browser), verify lib/ is in sync.
-#   2. test  — vitest (SSRF guard + store).
+#   1. typecheck — tsc (core + browser) against the `types/deepseek-ai.d.ts`
+#      stubs (the `@deepseek-ai/*` peer deps are not installed in the plugin's
+#      own `node_modules`; the stubs mirror the public API surface the plugin
+#      imports).
+#   2. build — esbuild (core + browser), verify lib/ is in sync.
+#   3. test  — vitest (SSRF guard + store).
 #
-# The typecheck (tsc) is NOT a CI gate: the `@deepseek-ai/*` peer dependencies
-# are resolved from the host DSH deployment at runtime and are not installed
-# in the plugin's own `node_modules`. The `types/deepseek-ai.d.ts` stubs let
-# the editor / local `tsc` work, but they are not a full API mirror. The build
-# (esbuild) is the authoritative gate: it bundles the real code and fails on
-# syntax/import errors.
+# The build (esbuild) is the authoritative gate: it bundles the real code and
+# fails on syntax/import errors. The typecheck is a best-effort static check
+# against the stubs.
 
 image: node:22
 
 stages:
+  - typecheck
   - build
   - test
 
 variables:
   # Peer deps are absent outside a DSH deployment; skip peer resolution.
   NPM_FLAGS: "--legacy-peer-deps --no-audit --no-fund"
+
+typecheck:
+  stage: typecheck
+  script:
+    - npm install $NPM_FLAGS
+    - npm run typecheck
+  rules:
+    - changes:
+        - "src/**/*"
+        - "browser/src/**/*"
+        - "types/**/*"
+        - "tsconfig.json"
+        - "browser/tsconfig.json"
+        - "package.json"
 
 build:
   stage: build

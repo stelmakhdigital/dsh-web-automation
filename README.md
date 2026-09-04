@@ -27,6 +27,17 @@ pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git
 
 > The `@deepseek-ai/*` peer dependencies are provided by your DSH installation (resolved from the workspace). If you install the plugin into a project that does not already have DSH's packages, install DSH first so the peers resolve to the host's versions.
 
+### Quick start: the `local-web.cordis.yml` overlay
+
+The repo ships [`local-web.cordis.yml`](local-web.cordis.yml) — a ready-made overlay that pins the `web` seam to the plugin's providers, enables `web_fetch` in the host `tool-web` row, and registers the plugin. Apply it on top of a standard DSH deployment:
+
+```sh
+dsh --patch "$PWD/local-web.cordis.yml"        # TUI
+dsh web --patch "$PWD/local-web.cordis.yml"    # web GUI
+```
+
+The seam pin is **required**: without it the seam sees two usable search providers (the deployment default plus `multi`) and fails with `WEB_PROVIDER_AMBIGUOUS`.
+
 ### Optional: browser automation
 
 The [`dsh-web-browser`](browser/) sub-package adds local Chromium (Playwright) automation behind the `browser_*` tools (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). It is separate because it pulls in Playwright + a Chromium download.
@@ -71,6 +82,14 @@ Add a row to your deployment's `cordis.yml` (or an overlay applied with `dsh --p
 
 Every field is defaulted, so an empty `config: {}` (or no `config` at all) enables the full local web stack with the keyless engines.
 
+## Relationship to DSH's built-in web packages
+
+This plugin is an **externalized, standalone copy** of DSH's internal web packages (`web-search-multi`, `web-fetch-cached`, `web-platforms`, `web-store`, `web-browser`, `tool-web-history`) and is currently **ahead of upstream** (SearXNG engine, news-mode freshness, embedding re-rank, LRU eviction, SSRF guard, inline screenshots).
+
+- **Mutual exclusion**: the plugin and the built-in packages register the same provider ids (`multi`, `cached-http`) and tool names. A deployment that loads both fails at startup with `WEB_DUPLICATE_PROVIDER` — keep one. If you use this plugin, do **not** apply DSH's `examples/web-local` overlay (or its preset copies), and vice versa.
+- **The tools come from the host**: `web_search` and `web_fetch` are registered by the host's `tool-web` plugin; this plugin registers the **providers** behind them (plus `web_platform_search` and the history tools). The overlay above enables `web_fetch` in the `tool-web` row.
+- **Upstream drift**: because the plugin evolves independently, its behavior may diverge from the built-in packages over time. The module headers in `src/` mark the upstream package each module mirrors.
+
 ## API keys (optional)
 
 The keyless engines (DuckDuckGo, Bing) work with no configuration. To opt in to Exa / DeepSeek / Jina, provide their API keys either:
@@ -98,7 +117,16 @@ Once installed and configured, the model can:
 
 ## Security
 
-- **SSRF guard** (on by default): `web_fetch` blocks requests to loopback, private, link-local, and otherwise reserved network targets. The check runs on the literal host and after DNS resolution (against rebinding). Set `fetch.allowPrivateNetworks: true` to disable the guard in a trusted, network-isolated environment.
+- **SSRF guard** (on by default): requests to loopback, private, link-local, and otherwise reserved network targets (IPv4 `0/8`, `10/8`, `127/8`, `172.16/12`, `169.254/16`, `192.168/16`; IPv6 `::1`, `::/128`, `fe80::/10`, `fc00::/7`) are blocked. The check runs on the literal host **and** after DNS resolution (against rebinding), and for `web_fetch`/enrichment it re-checks every redirect hop (max 5). Guarded paths and their flags:
+  | Path | Flag |
+  |---|---|
+  | `web_fetch` (cached fetch provider) | `fetch.allowPrivateNetworks` |
+  | search enrichment (page fetches for snippets) | `search.allowPrivateNetworks` |
+  | `web_platform_search` fetches (incl. RSS feed URLs) | `platforms.allowPrivateNetworks` |
+  | `browser_navigate` (Playwright) | `allowPrivateNetworks` in the `dsh-web-browser` config |
+
+  Set the relevant flag to `true` only in a trusted, network-isolated environment.
+- **Browser approval** (fail-closed): `browser_open`/`browser_navigate` require approval per the `dsh-web-browser` `approval` setting (`never` | `once` | `always`). If the approval service is unavailable or the call has no agent to route it through, the action is **denied**, not silently allowed.
 - **Cache eviction** (LRU by usage): the store keeps at most `fetch.cacheMaxPages` page records (default 500) and `search.cacheMaxSearches` search records (default 1000), evicting the least-recently-accessed beyond the cap after each write. This keeps `web.db` bounded over time.
 
 ## Known limitations
@@ -140,12 +168,25 @@ dsh-web-automation:
     freshness: 24h    # 24h | week | month | year
 ```
 
+## Smoke test
+
+After installing and applying the overlay, verify the stack end to end (in a DSH session):
+
+1. `web_search "hello world"` — returns sources (DDG/Bing keyless).
+2. `web_fetch https://example.com` twice — the second call is a cache hit (no network; check `web_search_stats`).
+3. `web_platform_search { platform: "github", query: "schemastery" }` — returns GitHub sources.
+4. `web_history` — shows the searches/fetches above.
+5. `web_fetch http://127.0.0.1/` — fails with `WEB_SSRF_BLOCKED` (the SSRF guard).
+6. (with `dsh-web-browser`) `browser_open` → `browser_navigate https://example.com` → `browser_screenshot` → `browser_close` — the screenshot file appears in the temp dir.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `ERESOLVE` peer conflict on install | Peer deps absent outside DSH deployment | `npm install --legacy-peer-deps` |
 | `Cannot find module '@deepseek-ai/...'` | Plugin installed without DSH's packages | Install DSH first (peers resolve to host's versions) |
+| `WEB_PROVIDER_AMBIGUOUS` at startup | The `web` seam sees two usable search providers | Add the `web` seam pin row (`searchProvider: multi`, `fetchProvider: cached-http`) — see the overlay |
+| `WEB_DUPLICATE_PROVIDER` at startup | Both the plugin and DSH's built-in web packages are loaded | Keep one — remove the built-in rows (or the plugin row); see "Relationship to DSH's built-in web packages" |
 | `web_fetch` blocked (SSRF) | Target is loopback/private/link-local | Set `fetch.allowPrivateNetworks: true` (trusted env only) |
 | SearXNG returns non-JSON | JSON API not enabled on the instance | Add `search.formats: [html, json]` to SearXNG's `settings.yml` |
 | Embedding re-rank falls back to BM25 | Embedding endpoint unreachable | Check the endpoint URL + model name; BM25 is the fallback |

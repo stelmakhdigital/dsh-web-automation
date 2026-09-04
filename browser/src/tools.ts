@@ -6,15 +6,14 @@
  * @module @deepseek-ai/dsh-web-browser/tools
  */
 
-import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import type { Context } from '@deepseek-ai/cordis'
+import { writeScreenshot } from './screenshot.ts'
 import type { BrowserElement, BrowserSession, BrowserTarget } from './types.ts'
 import { BrowserError, BROWSER_CODES } from './types.ts'
 
@@ -288,8 +287,9 @@ export function registerBrowserTools(ctx: Context, options: BrowserToolOptions):
         // Inline: return the image as base64 (no file write).
         return { mimeType: shot.mimeType, base64: shot.buffer.toString('base64') }
       }
-      const path = join(screenshotDir, `browser-${randomUUID()}.png`)
-      await writeFile(path, shot.buffer)
+      // The directory is created lazily (mkdir recursive) so the default
+      // temp-dir path works out of the box.
+      const path = await writeScreenshot(shot.buffer, screenshotDir)
       return { path, mimeType: shot.mimeType }
     },
   }))
@@ -310,7 +310,15 @@ export function registerBrowserTools(ctx: Context, options: BrowserToolOptions):
 
   async function approve(action: 'navigate' | 'evaluate' | 'click' | 'type', reason: string, exec: ToolRunContext): Promise<void> {
     if (!requiresApproval(action)) return
-    if (exec.agent === undefined) return
+    // Fail CLOSED when the approval grant cannot be routed: without an agent
+    // there is no session to audit to and no UI to route to (same semantics as
+    // the core tools' approval seam), so the action is denied, not skipped.
+    if (exec.agent === undefined) {
+      throw new BrowserError(
+        `approval is required for browser ${action}, but the call has no agent to route it through`,
+        BROWSER_CODES.APPROVAL_UNAVAILABLE,
+      )
+    }
     const approver = ctx.get('approval')
     if (approver === undefined) {
       throw new BrowserError(

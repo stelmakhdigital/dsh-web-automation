@@ -6,12 +6,19 @@
  * Page bodies are cached in the shared web store (the same `web_pages` table
  * the fetch provider writes), so a page fetched for enrichment is reused by
  * `web_fetch` and vice versa.
+ *
+ * Enrichment fetches go through the SSRF guard (`fetchPublic`): candidate
+ * URLs come from third-party SERPs, so private/reserved targets (loopback,
+ * LAN, link-local, cloud metadata) are never fetched — a blocked page simply
+ * keeps its engine snippet. Set `allowPrivateNetworks: true` to disable the
+ * guard in a trusted, network-isolated environment.
  * @module @deepseek-ai/dsh-web-search-multi/enrich
  */
 
 import { WebError } from '@deepseek-ai/dsh-web'
 import type { WebSearchSource } from '@deepseek-ai/dsh-web'
 import { deadline } from '@deepseek-ai/dsh-timeout'
+import { fetchPublic, SsrfBlockedError } from '../fetch/ssrf.ts'
 import type { WebStore } from '../store/index.ts'
 import { bm25Rank } from './bm25.ts'
 import { embeddingRerank, type EmbeddingOptions } from './embedding.ts'
@@ -37,6 +44,12 @@ export interface EnrichOptions {
   userAgent: string
   /** Concurrent page fetches. */
   concurrency: number
+  /**
+   * Allow enrichment page fetches to private/reserved network targets
+   * (loopback, LAN, link-local). Defaults to false: the SSRF guard blocks
+   * these. Enable only in a trusted, network-isolated environment.
+   */
+  allowPrivateNetworks: boolean
   /** Optional embedding endpoint for semantic re-ranking (falls back to BM25 when off/fails). */
   embedding?: EmbeddingOptions
 }
@@ -127,9 +140,11 @@ async function fetchPageText(url: string, options: EnrichOptions, signal: AbortS
   using d = deadline(signal, options.pageTimeoutMs, 'WEB_PAGE_TIMEOUT')
   let response: Response
   try {
-    response = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
+    // SSRF-guarded fetch: the candidate URL comes from a third-party SERP, so
+    // the guard (and every redirect hop) must pass before any bytes are read.
+    // A blocked page degrades to "no enrichment" — it never fails the search.
+    response = await fetchPublic(url, {
+      allowPrivate: options.allowPrivateNetworks,
       headers: {
         'user-agent': options.userAgent,
         'accept': 'text/html,application/xhtml+xml,text/*;q=0.9',
@@ -137,6 +152,7 @@ async function fetchPageText(url: string, options: EnrichOptions, signal: AbortS
       signal: d.signal,
     })
   } catch (error: unknown) {
+    if (error instanceof SsrfBlockedError) return undefined
     if (signal.aborted) throw new WebError('web search aborted', 'WEB_ABORTED', { cause: error })
     return undefined
   }

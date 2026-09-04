@@ -86,10 +86,31 @@ export function formatStatsOutput(stats: WebStoreStats): string {
   return lines.join('\n')
 }
 
+/** Optional apply options (used when the top-level plugin shares one store). */
+export interface ApplyOptions {
+  /** A shared store to use instead of creating one. */
+  store?: WebStore
+}
+
 /** Register the enabled web history tools. */
-export function apply(ctx: Context, config: Config): void {
+export function apply(ctx: Context, config: Config, options: ApplyOptions = {}): void {
   const resolved = config as ResolvedConfig
-  const store = new WebStore({ path: config.storePath ?? dshHomePath('web.db') })
+  let store: WebStore
+  if (options.store !== undefined) {
+    // Shared store (owned by the top-level plugin); the history tools only
+    // read/clear, so no eviction cap is merged.
+    store = options.store
+  } else {
+    // Standalone: own the store and close it when this plugin's fiber is
+    // disposed (HMR / context teardown).
+    const owned = new WebStore({ path: config.storePath ?? dshHomePath('web.db') })
+    ctx.effect(function* () {
+      yield () => {
+        void owned.close()
+      }
+    }, 'tool-web-history.store.close()')
+    store = owned
+  }
 
   ctx.systemPrompt.section({
     name: 'tool:web_history',

@@ -18,8 +18,9 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-web'
+import { WebError } from '@deepseek-ai/dsh-web'
 import { WebStore } from '../store/index.ts'
+import { PRODUCT_USER_AGENT } from '../user-agent.ts'
 import { BING_DEFAULT_ENDPOINT, BingEngine } from './engines/bing.ts'
 import { DUCKDUCKGO_DEFAULT_ENDPOINT, DuckDuckGoEngine } from './engines/ddg.ts'
 import { DeepSeekEngine } from './engines/deepseek.ts'
@@ -34,7 +35,7 @@ export type { MultiSearchProviderOptions } from './provider.ts'
 export type { EngineSearchResult, SearchEngine } from './engines/types.ts'
 
 /** Default `User-Agent`: an explicit product agent, never a browser disguise. */
-export const DEFAULT_USER_AGENT = 'deepseek-harness/0.1.1 (+https://github.com/deepseek-ai)'
+export const DEFAULT_USER_AGENT = PRODUCT_USER_AGENT
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'web-search-multi'
@@ -134,6 +135,12 @@ export interface Config {
    * BM25 when the endpoint is unreachable.
    */
   embedding?: { endpoint: string; model: string }
+  /**
+   * Allow enrichment page fetches to private/reserved network targets
+   * (loopback, LAN, link-local). Defaults to false: the SSRF guard blocks
+   * these. Enable only in a trusted, network-isolated environment.
+   */
+  allowPrivateNetworks?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -156,7 +163,8 @@ export const Config: z<Config> = z.object({
   cooldownBaseMs: z.number().default(30_000),
   cooldownMaxMs: z.number().default(3_600_000),
   freshness: z.string().default(''),
-  embedding: z.object({ endpoint: z.string().default(''), model: z.string().default('') }).default({}),
+  embedding: z.object({ endpoint: z.string().default(''), model: z.string().default('') }).default({ endpoint: '', model: '' }),
+  allowPrivateNetworks: z.boolean().default(false),
 })
 
 /** Complete config after schemastery applies every field default. */
@@ -215,8 +223,14 @@ function makeResolver(ctx: Context, ref: string): () => Promise<string | undefin
   }
 }
 
+/** Optional apply options (used when the top-level plugin shares one store). */
+export interface ApplyOptions {
+  /** A shared store to use instead of creating one (caps are merged in). */
+  store?: WebStore
+}
+
 /** Register the multi-engine search provider with `ctx.web`. */
-export function apply(ctx: Context, config: Config): void {
+export function apply(ctx: Context, config: Config, options: ApplyOptions = {}): void {
   // The settings section's resolved value (schema defaults → composition base
   // → user layer) is the authoritative source for the schema fields, so a
   // committed edit to engines/mode/region applies on the next launch. The
@@ -250,10 +264,26 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error(`web-search-multi: mode must be "fallback" or "fuse", got "${mode}"`)
   }
   const env = launchEnvironmentOf(ctx)
-  const store = new WebStore({
-    path: config.storePath ?? dshHomePath('web.db'),
-    evictLimits: { maxSearches: resolved.cacheMaxSearches },
-  })
+  let store: WebStore
+  if (options.store !== undefined) {
+    // Shared store (owned by the top-level plugin): merge this module's
+    // resolved cap — the settings section is the authoritative source.
+    options.store.setEvictLimits({ maxSearches: resolved.cacheMaxSearches })
+    store = options.store
+  } else {
+    // Standalone: own the store and close it when this plugin's fiber is
+    // disposed (HMR / context teardown).
+    const owned = new WebStore({
+      path: config.storePath ?? dshHomePath('web.db'),
+      evictLimits: { maxSearches: resolved.cacheMaxSearches },
+    })
+    ctx.effect(function* () {
+      yield () => {
+        void owned.close()
+      }
+    }, 'web-search-multi.store.close()')
+    store = owned
+  }
   const engines: SearchEngine[] = [
     new DuckDuckGoEngine({
       endpoint: DUCKDUCKGO_DEFAULT_ENDPOINT,
@@ -324,6 +354,7 @@ export function apply(ctx: Context, config: Config): void {
       snippetChars: resolved.snippetChars,
       userAgent: resolved.userAgent,
       concurrency: resolved.enrichConcurrency,
+      allowPrivateNetworks: resolved.allowPrivateNetworks,
       ...(resolved.embedding.endpoint.length > 0
         ? {
             embedding: {
@@ -340,5 +371,20 @@ export function apply(ctx: Context, config: Config): void {
       info: (message: string, ...meta: unknown[]) => ctx.logger?.info(message, ...meta),
     },
   })
-  ctx.web.registerSearchProvider(provider)
+  try {
+    ctx.web.registerSearchProvider(provider)
+  } catch (error) {
+    // A duplicate id means the deployment ALSO loads DSH's built-in
+    // web-search-multi (e.g. via the local-web overlay). The plugin and the
+    // built-in packages are mutually exclusive — say so, instead of surfacing
+    // the bare seam error.
+    if (error instanceof WebError && error.code === 'WEB_DUPLICATE_PROVIDER') {
+      throw new WebError(
+        'the "multi" search provider is already registered: the dsh-web-automation plugin and DSH built-in web packages (e.g. the local-web overlay) are mutually exclusive — keep one',
+        'WEB_DUPLICATE_PROVIDER',
+        { cause: error },
+      )
+    }
+    throw error
+  }
 }

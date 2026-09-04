@@ -1,14 +1,16 @@
 /**
- * SSRF guard for the cached fetch provider. Blocks requests to private,
+ * SSRF guard for the browser automation tools. Blocks navigation to private,
  * loopback, link-local, and otherwise non-public network targets so the
- * plugin cannot be used to probe internal infrastructure (cloud metadata
- * endpoints, LAN services, localhost) through the model's `web_fetch` tool.
+ * `browser_*` tools cannot be used to probe internal infrastructure (cloud
+ * metadata endpoints, LAN services, localhost) through the model.
  *
- * The check runs twice: once on the literal hostname (catches IP-literal
- * URLs) and once after DNS resolution (catches domains that resolve to
- * private addresses, including DNS-rebinding). A request is allowed only if
- * every resolved address is public.
- * @module dsh-web-automation/fetch/ssrf
+ * Standalone copy of the root package's guard (`src/fetch/ssrf.ts`): the
+ * browser sub-package is a separate npm package with its own peer
+ * dependencies, so it cannot import across packages. The check runs on the
+ * literal hostname (catches IP-literal URLs) and after DNS resolution
+ * (catches domains that resolve to private addresses, including
+ * DNS-rebinding). A URL is allowed only if every resolved address is public.
+ * @module @deepseek-ai/dsh-web-browser/ssrf
  */
 
 import { lookup } from 'node:dns/promises'
@@ -177,80 +179,4 @@ export async function checkSsrf(url: string, options: { allowPrivate?: boolean }
     return { allowed: false, reason: `host ${host} resolves to private/reserved address(es): ${blocked.join(', ')}`, addresses: ipStrings }
   }
   return { allowed: true, addresses: ipStrings }
-}
-
-/**
- * A URL (or a redirect hop) was rejected by the SSRF guard. Callers that must
- * fail loudly (tools) translate this into a `WebError`; callers that degrade
- * gracefully (search enrichment) skip the page.
- */
-export class SsrfBlockedError extends Error {
-  /** The guard's block reason. */
-  readonly reason: string
-  /** The blocked URL. */
-  readonly url: string
-
-  constructor(url: string, reason: string) {
-    super(`SSRF guard blocked ${url}: ${reason}`)
-    this.url = url
-    this.reason = reason
-  }
-}
-
-/** Maximum redirect hops followed by {@link fetchPublic}. */
-export const SSRF_MAX_REDIRECTS = 5
-
-/** HTTP status codes that carry a `Location` header. */
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
-
-/**
- * Fetch a URL with the SSRF guard enforced on the initial URL and on EVERY
- * redirect hop: cross-origin redirects are allowed, but only to public
- * addresses (a public URL that 302s to the cloud metadata endpoint is
- * blocked). The guard is re-run per hop, which also bounds the TOCTOU window
- * to a single hop.
- *
- * Returns the final `Response` — the caller owns reading/cancelling its body.
- * Network failures propagate unchanged (the caller classifies them); a guard
- * block rejects with {@link SsrfBlockedError}.
- * @param url - the absolute http(s) URL to fetch.
- * @param options - guard and request options.
- * @returns the final response after following (public) redirects.
- */
-export async function fetchPublic(
-  url: string,
-  options: { allowPrivate?: boolean; headers?: Record<string, string>; signal?: AbortSignal; maxRedirects?: number } = {},
-): Promise<Response> {
-  const maxRedirects = options.maxRedirects ?? SSRF_MAX_REDIRECTS
-  let currentUrl = url
-  let hops = 0
-  for (;;) {
-    const check = await checkSsrf(currentUrl, { allowPrivate: options.allowPrivate })
-    if (!check.allowed) throw new SsrfBlockedError(currentUrl, check.reason ?? 'blocked by the SSRF guard')
-    const response = await fetch(currentUrl, {
-      method: 'GET',
-      redirect: 'manual',
-      ...options.headers !== undefined ? { headers: options.headers } : {},
-      ...options.signal !== undefined ? { signal: options.signal } : {},
-    })
-    if (!REDIRECT_STATUSES.has(response.status)) return response
-    if (hops >= maxRedirects) {
-      await response.body?.cancel()
-      throw new Error(`exceeded the maximum of ${maxRedirects} redirects`)
-    }
-    const location = response.headers.get('location')
-    await response.body?.cancel()
-    if (location === null) throw new Error(`redirect (HTTP ${response.status}) without a Location header`)
-    let next: URL
-    try {
-      next = new URL(location, currentUrl)
-    } catch {
-      throw new Error(`invalid redirect Location "${location}"`)
-    }
-    if (next.protocol !== 'http:' && next.protocol !== 'https:') {
-      throw new Error(`redirect to unsupported protocol ${next.protocol}`)
-    }
-    currentUrl = next.toString()
-    hops += 1
-  }
 }

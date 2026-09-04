@@ -7,6 +7,7 @@
  */
 
 import { chromium, type Browser, type Page } from 'playwright'
+import { checkSsrf } from './ssrf.ts'
 import type {
   BrowserElement,
   BrowserNavigateResult,
@@ -33,6 +34,30 @@ export interface PlaywrightProviderConfig {
   readonly maxTextLength?: number
   /** Default snapshot element bound. Default `200`. */
   readonly maxElements?: number
+  /**
+   * Allow navigation to private/reserved network targets (loopback, LAN,
+   * link-local). Default `false`: the SSRF guard blocks these. Enable only in
+   * a trusted, network-isolated environment.
+   */
+  readonly allowPrivateNetworks?: boolean
+}
+
+/**
+ * Assert a navigation target is public (not a private/reserved network
+ * target). Throws {@link BrowserError} `BROWSER_SSRF_BLOCKED` when the guard
+ * blocks the URL. The check runs on the literal host and after DNS resolution
+ * (against rebinding).
+ * @param url - the http(s) URL to check.
+ * @param allowPrivate - when true, skip the check (allow all).
+ */
+export async function assertPublicNavigation(url: string, allowPrivate: boolean): Promise<void> {
+  const check = await checkSsrf(url, { allowPrivate })
+  if (!check.allowed) {
+    throw new BrowserError(
+      `navigation to ${url} blocked by the SSRF guard: ${check.reason ?? 'private/reserved target'}`,
+      BROWSER_CODES.SSRF_BLOCKED,
+    )
+  }
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -54,6 +79,7 @@ export class PlaywrightProvider implements BrowserProvider {
   private readonly authProfiles: Record<string, string>
   private readonly maxTextLength: number
   private readonly maxElements: number
+  private readonly allowPrivateNetworks: boolean
 
   constructor(config: PlaywrightProviderConfig = {}) {
     this.headless = config.headless ?? true
@@ -61,6 +87,7 @@ export class PlaywrightProvider implements BrowserProvider {
     this.authProfiles = config.authProfiles ?? {}
     this.maxTextLength = config.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH
     this.maxElements = config.maxElements ?? DEFAULT_MAX_ELEMENTS
+    this.allowPrivateNetworks = config.allowPrivateNetworks ?? false
   }
 
   /** Cheap local usability check: the Chromium executable must resolve. */
@@ -80,7 +107,7 @@ export class PlaywrightProvider implements BrowserProvider {
     if (storageState !== undefined) contextOptions.storageState = storageState
     const context = await browser.newContext(contextOptions)
     const page = await context.newPage()
-    return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements)
+    return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements, this.allowPrivateNetworks)
   }
 
   private resolveStorageState(profileName: string | undefined): string | undefined {
@@ -109,6 +136,7 @@ class PlaywrightSession implements BrowserSession {
     private readonly timeoutMs: number,
     private readonly maxTextLength: number,
     private readonly maxElements: number,
+    private readonly allowPrivateNetworks: boolean,
   ) {}
 
   url(): string {
@@ -118,13 +146,21 @@ class PlaywrightSession implements BrowserSession {
   async navigate(url: string, signal?: AbortSignal): Promise<BrowserNavigateResult> {
     this.ensureOpen(signal)
     const target = assertHttpUrl(url)
+    // SSRF guard on the literal target (before any browser work).
+    await assertPublicNavigation(target, this.allowPrivateNetworks)
     try {
       await this.page.goto(target, { waitUntil: 'load', timeout: this.timeoutMs })
     } catch (error) {
       throw classifyPlaywrightError(error, 'navigate')
     }
+    // Playwright follows redirects internally, so re-check the FINAL url: a
+    // public URL that 302s to a private target is reported as blocked.
+    const finalUrl = this.page.url()
+    if (finalUrl.length > 0 && finalUrl !== 'about:blank') {
+      await assertPublicNavigation(finalUrl, this.allowPrivateNetworks)
+    }
     const title = await this.page.title().catch(() => undefined)
-    return { url: this.page.url(), ...(title !== undefined ? { title } : {}) }
+    return { url: finalUrl, ...(title !== undefined ? { title } : {}) }
   }
 
   async snapshot(options: BrowserSnapshotOptions = {}, signal?: AbortSignal): Promise<BrowserSnapshot> {

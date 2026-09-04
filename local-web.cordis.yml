@@ -1,0 +1,68 @@
+# Local-web overlay for the dsh-web-automation plugin: keyless multi-engine
+# web search + cached fetch + platform search + history tools for the standard
+# DSH deployment. Apply with:
+#
+#   dsh --patch "$PWD/local-web.cordis.yml"
+#   # or, for the web GUI:
+#   dsh web --patch "$PWD/local-web.cordis.yml"
+#
+# What it does:
+#   - pins the `web` seam to the plugin's providers: the `multi` search
+#     provider (DuckDuckGo + Bing keyless by default; Exa/DeepSeek/Jina/SearXNG
+#     join when configured) and the `cached-http` fetch provider (SQLite page
+#     cache with ETag/Last-Modified revalidation). Without this pin the seam
+#     sees two usable search providers (the deployment default plus `multi`)
+#     and fails with WEB_PROVIDER_AMBIGUOUS;
+#   - enables `web_fetch` in the host `tool-web` row (TUI); the web GUI needs
+#     the preset copy instead (see the DSH repo, presets/standard/);
+#   - registers the plugin: `web_platform_search` (keyless platform search:
+#     GitHub, Reddit, YouTube, Bilibili, V2EX, RSS + configured platforms) and
+#     the history tools (`web_history`, `web_search_stats`, `web_cache_clear`).
+#
+# The `web_search` / `web_fetch` tools themselves come from the host `tool-web`
+# plugin (enabled above) — the plugin registers the PROVIDERS, not those tools.
+#
+# The base bundle is otherwise untouched: the default deployment keeps
+# `deepseek-official` search and no fetch provider.
+
+- id: web
+  config:
+    searchProvider: multi
+    fetchProvider: cached-http
+
+- id: tool-web
+  config:
+    fetch: true
+    searchTimeoutMs: 60000
+    fetchTimeoutMs: 45000
+
+- insert:
+    - id: web-automation
+      name: 'dsh-web-automation'
+      config:
+        search:
+          engines: [ddg, bing, exa, deepseek, jina, searxng]
+          mode: fallback
+          enrich: true
+          enrichFetchLimit: 10
+          enrichKeep: 5
+        fetch:
+          revalidate: true
+        platforms:
+          tool: true
+          maxResults: 20
+        history:
+          history: true
+          cacheClear: true
+          stats: true
+
+# Browser automation is a separate sub-package (dsh-web-browser). After
+# `pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser`
+# and `npx playwright install chromium`, add its row here:
+#
+#    - id: web-browser
+#      name: 'dsh-web-browser'
+#      config:
+#        tool: true
+#        headless: true
+#        approval: never

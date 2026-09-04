@@ -72,6 +72,12 @@ export interface Config {
   maxElements?: number
   /** Auth profiles: name → storage-state file path. */
   authProfiles?: Record<string, string>
+  /**
+   * Allow navigation to private/reserved network targets (loopback, LAN,
+   * link-local). Defaults to false: the SSRF guard blocks these. Enable only
+   * in a trusted, network-isolated environment.
+   */
+  allowPrivateNetworks?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -82,6 +88,7 @@ export const Config: z<Config> = z.object({
   maxTextLength: z.number().default(DEFAULT_BROWSER_MAX_TEXT_LENGTH),
   maxElements: z.number().default(DEFAULT_BROWSER_MAX_ELEMENTS),
   authProfiles: z.dict(z.string()).default({}),
+  allowPrivateNetworks: z.boolean().default(false),
 })
 
 /** Complete config after schemastery applies every field default. */
@@ -128,6 +135,7 @@ export function apply(ctx: Context, config: Config): void {
     maxTextLength: resolved.maxTextLength,
     maxElements: resolved.maxElements,
     authProfiles: resolved.authProfiles,
+    allowPrivateNetworks: resolved.allowPrivateNetworks,
   }))
 
   ctx.systemPrompt.section({

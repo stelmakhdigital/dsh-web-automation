@@ -21,7 +21,8 @@ var BROWSER_CODES = {
   ABORTED: "BROWSER_ABORTED",
   APPROVAL_DENIED: "BROWSER_APPROVAL_DENIED",
   APPROVAL_UNAVAILABLE: "BROWSER_APPROVAL_UNAVAILABLE",
-  AUTH_MISSING: "BROWSER_AUTH_MISSING"
+  AUTH_MISSING: "BROWSER_AUTH_MISSING",
+  SSRF_BLOCKED: "BROWSER_SSRF_BLOCKED"
 };
 
 // src/runtime.ts
@@ -123,6 +124,111 @@ var runtime_default = BrowserRuntime;
 
 // src/playwright.ts
 import { chromium } from "playwright";
+
+// src/ssrf.ts
+import { lookup } from "node:dns/promises";
+var IPV4_BLOCKED = [
+  // [network (uint32), prefix length]
+  [0, 8],
+  // 0.0.0.0/8 "this network"
+  [167772160, 8],
+  // 10.0.0.0/8 private
+  [2130706432, 8],
+  // 127.0.0.0/8 loopback
+  [2886729728, 12],
+  // 172.16.0.0/12 private
+  [2851995648, 16],
+  // 169.254.0.0/16 link-local (cloud metadata)
+  [3232235520, 16],
+  // 192.168.0.0/16 private
+  [4227858432, 7]
+  // fc00::/7 IPv6 ULA (kept here for symmetry; IPv6 handled separately)
+];
+function ipv4ToUint32(text) {
+  const parts = text.split(".");
+  if (parts.length !== 4) return void 0;
+  let value = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return void 0;
+    const octet = Number(part);
+    if (octet > 255) return void 0;
+    value = value << 8 | octet;
+  }
+  return value >>> 0;
+}
+function inCidr(value, network, prefix) {
+  if (prefix === 0) return true;
+  const mask = 4294967295 << 32 - prefix >>> 0;
+  return (value & mask) === (network & mask);
+}
+function isPrivateIpv4(text) {
+  const value = ipv4ToUint32(text);
+  if (value === void 0) return false;
+  return IPV4_BLOCKED.some(([network, prefix]) => inCidr(value, network, prefix));
+}
+function isPrivateIpv6(text) {
+  const lower = text.toLowerCase();
+  if (lower === "::1" || lower === "::") return true;
+  if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  return false;
+}
+function isIpLiteral(host) {
+  const bare = host.replace(/^\[|\]$/g, "");
+  if (bare.includes(":")) return true;
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(bare);
+}
+function isPublicAddress(address) {
+  if (address.includes(":")) return !isPrivateIpv6(address);
+  return !isPrivateIpv4(address);
+}
+async function checkSsrf(url, options = {}) {
+  if (options.allowPrivate) return { allowed: true };
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { allowed: false, reason: "unparseable URL" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { allowed: false, reason: `protocol ${parsed.protocol} is not allowed (only http/https)` };
+  }
+  const host = parsed.hostname;
+  if (host === "") return { allowed: false, reason: "empty hostname" };
+  if (isIpLiteral(host)) {
+    const bare = host.replace(/^\[|\]$/g, "");
+    if (!isPublicAddress(bare)) {
+      return { allowed: false, reason: `host ${host} is a private/reserved address`, addresses: [bare] };
+    }
+    return { allowed: true, addresses: [bare] };
+  }
+  let addresses;
+  try {
+    addresses = await lookup(host, { all: true });
+  } catch {
+    return { allowed: false, reason: `DNS resolution failed for ${host}` };
+  }
+  if (addresses.length === 0) {
+    return { allowed: false, reason: `no addresses resolved for ${host}` };
+  }
+  const ipStrings = addresses.map((a) => a.address);
+  const blocked = ipStrings.filter((ip) => !isPublicAddress(ip));
+  if (blocked.length > 0) {
+    return { allowed: false, reason: `host ${host} resolves to private/reserved address(es): ${blocked.join(", ")}`, addresses: ipStrings };
+  }
+  return { allowed: true, addresses: ipStrings };
+}
+
+// src/playwright.ts
+async function assertPublicNavigation(url, allowPrivate) {
+  const check = await checkSsrf(url, { allowPrivate });
+  if (!check.allowed) {
+    throw new BrowserError(
+      `navigation to ${url} blocked by the SSRF guard: ${check.reason ?? "private/reserved target"}`,
+      BROWSER_CODES.SSRF_BLOCKED
+    );
+  }
+}
 var DEFAULT_TIMEOUT_MS = 3e4;
 var DEFAULT_MAX_TEXT_LENGTH = 2e4;
 var DEFAULT_MAX_ELEMENTS = 200;
@@ -134,12 +240,14 @@ var PlaywrightProvider = class {
   authProfiles;
   maxTextLength;
   maxElements;
+  allowPrivateNetworks;
   constructor(config = {}) {
     this.headless = config.headless ?? true;
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.authProfiles = config.authProfiles ?? {};
     this.maxTextLength = config.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH;
     this.maxElements = config.maxElements ?? DEFAULT_MAX_ELEMENTS;
+    this.allowPrivateNetworks = config.allowPrivateNetworks ?? false;
   }
   /** Cheap local usability check: the Chromium executable must resolve. */
   available() {
@@ -157,7 +265,7 @@ var PlaywrightProvider = class {
     if (storageState !== void 0) contextOptions.storageState = storageState;
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
-    return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements);
+    return new PlaywrightSession(browser, page, this.timeoutMs, this.maxTextLength, this.maxElements, this.allowPrivateNetworks);
   }
   resolveStorageState(profileName) {
     if (profileName === void 0) return void 0;
@@ -172,18 +280,20 @@ var PlaywrightProvider = class {
   }
 };
 var PlaywrightSession = class {
-  constructor(browser, page, timeoutMs, maxTextLength, maxElements) {
+  constructor(browser, page, timeoutMs, maxTextLength, maxElements, allowPrivateNetworks) {
     this.browser = browser;
     this.page = page;
     this.timeoutMs = timeoutMs;
     this.maxTextLength = maxTextLength;
     this.maxElements = maxElements;
+    this.allowPrivateNetworks = allowPrivateNetworks;
   }
   browser;
   page;
   timeoutMs;
   maxTextLength;
   maxElements;
+  allowPrivateNetworks;
   providerId = "playwright";
   closed = false;
   url() {
@@ -192,13 +302,18 @@ var PlaywrightSession = class {
   async navigate(url, signal) {
     this.ensureOpen(signal);
     const target = assertHttpUrl(url);
+    await assertPublicNavigation(target, this.allowPrivateNetworks);
     try {
       await this.page.goto(target, { waitUntil: "load", timeout: this.timeoutMs });
     } catch (error) {
       throw classifyPlaywrightError(error, "navigate");
     }
+    const finalUrl = this.page.url();
+    if (finalUrl.length > 0 && finalUrl !== "about:blank") {
+      await assertPublicNavigation(finalUrl, this.allowPrivateNetworks);
+    }
     const title = await this.page.title().catch(() => void 0);
-    return { url: this.page.url(), ...title !== void 0 ? { title } : {} };
+    return { url: finalUrl, ...title !== void 0 ? { title } : {} };
   }
   async snapshot(options = {}, signal) {
     this.ensureOpen(signal);
@@ -347,11 +462,22 @@ function classifyPlaywrightError(error, action) {
 }
 
 // src/tools.ts
-import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 import { defineTool } from "@deepseek-ai/dsh-tools";
+
+// src/screenshot.ts
+import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+async function writeScreenshot(buffer, dir) {
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, `browser-${randomUUID()}.png`);
+  await writeFile(path, buffer);
+  return path;
+}
+
+// src/tools.ts
 function textBlock(text) {
   return [{ type: "text", text }];
 }
@@ -393,7 +519,7 @@ function toJsonValue(value) {
 }
 function registerBrowserTools(ctx, options) {
   const approval = options.approval;
-  const screenshotDir = options.screenshotDir ?? join(tmpdir(), "dsh-browser-screenshots");
+  const screenshotDir = options.screenshotDir ?? join2(tmpdir(), "dsh-browser-screenshots");
   const requiresApproval = (action) => {
     if (approval === "never") return false;
     if (approval === "all") return true;
@@ -588,8 +714,7 @@ function registerBrowserTools(ctx, options) {
       if (args.inline === true) {
         return { mimeType: shot.mimeType, base64: shot.buffer.toString("base64") };
       }
-      const path = join(screenshotDir, `browser-${randomUUID()}.png`);
-      await writeFile(path, shot.buffer);
+      const path = await writeScreenshot(shot.buffer, screenshotDir);
       return { path, mimeType: shot.mimeType };
     }
   }));
@@ -608,7 +733,12 @@ function registerBrowserTools(ctx, options) {
   }));
   async function approve(action, reason, exec) {
     if (!requiresApproval(action)) return;
-    if (exec.agent === void 0) return;
+    if (exec.agent === void 0) {
+      throw new BrowserError(
+        `approval is required for browser ${action}, but the call has no agent to route it through`,
+        BROWSER_CODES.APPROVAL_UNAVAILABLE
+      );
+    }
     const approver = ctx.get("approval");
     if (approver === void 0) {
       throw new BrowserError(
@@ -643,7 +773,8 @@ var Config = z2.object({
   timeoutMs: z2.number().default(DEFAULT_BROWSER_TIMEOUT_MS),
   maxTextLength: z2.number().default(DEFAULT_BROWSER_MAX_TEXT_LENGTH),
   maxElements: z2.number().default(DEFAULT_BROWSER_MAX_ELEMENTS),
-  authProfiles: z2.dict(z2.string()).default({})
+  authProfiles: z2.dict(z2.string()).default({}),
+  allowPrivateNetworks: z2.boolean().default(false)
 });
 function assertPositiveInteger(name2, value) {
   if (!Number.isInteger(value) || value < 1) {
@@ -669,7 +800,8 @@ function apply(ctx, config) {
     timeoutMs: resolved.timeoutMs,
     maxTextLength: resolved.maxTextLength,
     maxElements: resolved.maxElements,
-    authProfiles: resolved.authProfiles
+    authProfiles: resolved.authProfiles,
+    allowPrivateNetworks: resolved.allowPrivateNetworks
   }));
   ctx.systemPrompt.section({
     name: "tool:browser",

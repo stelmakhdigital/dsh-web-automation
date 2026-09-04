@@ -40,8 +40,8 @@ describe('WebStore — search records', () => {
     await store.recordSearch({ cacheKey: 'c', query: 'c', engines: ['ddg'], createdAt: now, sources: [], truncated: false })
     const recent = await store.recentSearches(2)
     expect(recent).toHaveLength(2)
-    expect(recent[0].query).toBe('c') // newest
-    expect(recent[1].query).toBe('b')
+    expect(recent[0]?.query).toBe('c') // newest
+    expect(recent[1]?.query).toBe('b')
     await store.close()
   })
 })

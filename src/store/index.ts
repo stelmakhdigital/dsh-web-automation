@@ -249,7 +249,15 @@ export class WebStore {
     return Number(result.lastInsertRowid)
   }
 
-  /** Read one search record by cache key (and mark it accessed for LRU). */
+  /**
+   * Read one search record by cache key (and mark it accessed for LRU).
+   *
+   * The LRU touch is a synchronous `UPDATE` on the read path — a deliberate
+   * cost of LRU semantics (a cache hit must count as an access or hot entries
+   * would be evicted). WAL mode keeps this cheap and non-blocking for other
+   * connections; at this plugin's scale (a handful of reads per search) it is
+   * not a concern.
+   */
   async readSearch(cacheKey: string): Promise<StoredSearch | undefined> {
     const db = await this.ensureOpen()
     const row = db.prepare('SELECT * FROM web_searches WHERE cache_key = ?').get(cacheKey) as SearchRow | undefined
@@ -391,6 +399,18 @@ export class WebStore {
       pages = Number(result.changes)
     }
     return { searches, pages }
+  }
+
+  /**
+   * Merge eviction caps into the store's current caps. A store shared by the
+   * search and fetch modules starts cap-less; each module merges its own
+   * resolved cap (search → `maxSearches`, fetch → `maxPages`) after resolving
+   * its config, so the shared store accumulates both.
+   * @param limits - the caps to merge in (undefined fields are preserved).
+   */
+  setEvictLimits(limits: { maxSearches?: number; maxPages?: number }): void {
+    const current = this.options.evictLimits ?? {}
+    this.options.evictLimits = { ...current, ...limits }
   }
 
   /**

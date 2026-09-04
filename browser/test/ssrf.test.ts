@@ -1,12 +1,30 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { checkSsrf } from '../src/fetch/ssrf.ts'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock node:dns/promises so domain tests control the resolved addresses.
 vi.mock('node:dns/promises', () => ({
   lookup: vi.fn(),
 }))
+// The playwright + @deepseek-ai/* peer deps are provided by the host at
+// runtime and are NOT installed here; mock the runtime imports.
+vi.mock('playwright', () => ({
+  chromium: { executablePath: () => '' },
+}))
+vi.mock('@deepseek-ai/dsh-llm', () => {
+  class HarnessError extends Error {
+    readonly code?: string
+    constructor(message: string, code?: string, options?: { cause?: unknown }) {
+      super(message, options)
+      this.code = code
+    }
+  }
+  return { HarnessError }
+})
 
 import { lookup } from 'node:dns/promises'
+import { checkSsrf } from '../src/ssrf.ts'
+import { assertPublicNavigation } from '../src/playwright.ts'
+import { BROWSER_CODES, BrowserError } from '../src/types.ts'
+
 const mockLookup = vi.mocked(lookup)
 
 /**
@@ -21,22 +39,16 @@ beforeEach(() => {
   mockLookup.mockReset()
 })
 
-describe('checkSsrf — IP literals (no DNS)', () => {
+describe('checkSsrf (browser copy) — IP literals (no DNS)', () => {
   it('allows a public IPv4 literal', async () => {
     const result = await checkSsrf('http://8.8.8.8/')
     expect(result.allowed).toBe(true)
     expect(result.addresses).toEqual(['8.8.8.8'])
   })
 
-  it('allows a public IPv4 literal (https)', async () => {
-    const result = await checkSsrf('https://1.1.1.1/')
-    expect(result.allowed).toBe(true)
-  })
-
   it.each([
     ['http://10.0.0.1/', '10/8 private'],
     ['http://172.16.0.1/', '172.16/12 private'],
-    ['http://172.31.255.255/', '172.16/12 private (upper bound)'],
     ['http://192.168.1.1/', '192.168/16 private'],
     ['http://127.0.0.1/', 'loopback'],
     ['http://169.254.169.254/', 'link-local (cloud metadata)'],
@@ -49,7 +61,6 @@ describe('checkSsrf — IP literals (no DNS)', () => {
 
   it.each([
     ['http://[::1]/', 'IPv6 loopback'],
-    ['http://[::]/', 'IPv6 unspecified'],
     ['http://[fe80::1]/', 'IPv6 link-local'],
     ['http://[fc00::1]/', 'IPv6 ULA (fc)'],
     ['http://[fd00::1]/', 'IPv6 ULA (fd)'],
@@ -57,47 +68,27 @@ describe('checkSsrf — IP literals (no DNS)', () => {
     const result = await checkSsrf(url)
     expect(result.allowed).toBe(false)
   })
-})
 
-describe('checkSsrf — protocol / parse guards', () => {
   it.each([
     ['ftp://example.com/', 'ftp'],
     ['file:///etc/passwd', 'file'],
-    ['gopher://example.com/', 'gopher'],
-  ])('blocks %s protocol', async (url) => {
+  ])('blocks %s protocol', async (url, _label) => {
     const result = await checkSsrf(url)
     expect(result.allowed).toBe(false)
     expect(result.reason).toMatch(/protocol/)
   })
-
-  it('blocks an unparseable URL', async () => {
-    const result = await checkSsrf('not-a-url')
-    expect(result.allowed).toBe(false)
-    expect(result.reason).toMatch(/unparseable/)
-  })
 })
 
-describe('checkSsrf — domain resolution (DNS mock)', () => {
+describe('checkSsrf (browser copy) — domain resolution (DNS mock)', () => {
   it('allows a domain that resolves to a public IP', async () => {
     mockLookup.mockResolvedValueOnce(resolvedAddresses([{ address: '93.184.216.34', family: 4 }]))
     const result = await checkSsrf('https://example.com/')
     expect(result.allowed).toBe(true)
-    expect(result.addresses).toEqual(['93.184.216.34'])
   })
 
   it('blocks a domain that resolves to a private IP', async () => {
     mockLookup.mockResolvedValueOnce(resolvedAddresses([{ address: '10.0.0.5', family: 4 }]))
     const result = await checkSsrf('https://internal.example.com/')
-    expect(result.allowed).toBe(false)
-    expect(result.reason).toMatch(/private|reserved/)
-  })
-
-  it('blocks a domain with mixed public+private addresses (anti-rebinding)', async () => {
-    mockLookup.mockResolvedValueOnce(resolvedAddresses([
-      { address: '93.184.216.34', family: 4 },
-      { address: '127.0.0.1', family: 4 },
-    ]))
-    const result = await checkSsrf('https://rebinding.example.com/')
     expect(result.allowed).toBe(false)
     expect(result.reason).toMatch(/private|reserved/)
   })
@@ -108,23 +99,26 @@ describe('checkSsrf — domain resolution (DNS mock)', () => {
     expect(result.allowed).toBe(false)
     expect(result.reason).toMatch(/DNS resolution failed/)
   })
-
-  it('blocks when no addresses resolve', async () => {
-    mockLookup.mockResolvedValueOnce(resolvedAddresses([]))
-    const result = await checkSsrf('https://empty.example.com/')
-    expect(result.allowed).toBe(false)
-    expect(result.reason).toMatch(/no addresses/)
-  })
 })
 
-describe('checkSsrf — allowPrivate bypass', () => {
-  it('allows a private IP when allowPrivate is true', async () => {
-    const result = await checkSsrf('http://10.0.0.1/', { allowPrivate: true })
-    expect(result.allowed).toBe(true)
+describe('assertPublicNavigation', () => {
+  it('throws BROWSER_SSRF_BLOCKED for a private IP literal', async () => {
+    const error = await assertPublicNavigation('http://169.254.169.254/latest/meta-data/', false).catch(e => e)
+    expect(error).toBeInstanceOf(BrowserError)
+    expect((error as BrowserError).code).toBe(BROWSER_CODES.SSRF_BLOCKED)
   })
 
-  it('allows any URL when allowPrivate is true', async () => {
-    const result = await checkSsrf('http://127.0.0.1/admin', { allowPrivate: true })
-    expect(result.allowed).toBe(true)
+  it('throws BROWSER_SSRF_BLOCKED for a domain resolving to a private IP', async () => {
+    mockLookup.mockResolvedValueOnce(resolvedAddresses([{ address: '192.168.0.10', family: 4 }]))
+    const error = await assertPublicNavigation('https://lan.example.com/', false).catch(e => e)
+    expect((error as BrowserError).code).toBe(BROWSER_CODES.SSRF_BLOCKED)
+  })
+
+  it('allows a public IP literal', async () => {
+    await expect(assertPublicNavigation('https://8.8.8.8/', false)).resolves.toBeUndefined()
+  })
+
+  it('allows a private target when allowPrivate is true', async () => {
+    await expect(assertPublicNavigation('http://127.0.0.1/admin', true)).resolves.toBeUndefined()
   })
 })

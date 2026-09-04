@@ -2,15 +2,18 @@
 #
 # Stages:
 #   1. typecheck — tsc (core + browser) against the `types/deepseek-ai.d.ts`
-#      stubs (the `@deepseek-ai/*` peer deps are not installed in the plugin's
-#      own `node_modules`; the stubs mirror the public API surface the plugin
-#      imports).
-#   2. build — esbuild (core + browser), verify lib/ is in sync.
-#   3. test  — vitest (SSRF guard + store).
+#      stubs (fast; the `@deepseek-ai/*` peer deps are not installed in the
+#      plugin's own `node_modules`).
+#   2. typecheck-host — BLOCKING tsc against the REAL DSH host source types:
+#      shallow-clone deepseek-harness, map the `@deepseek-ai/*` peer deps to
+#      their sources via the host's own paths map (scripts/resolve-host-types.mjs),
+#      `tsc --noEmit`. Stricter than the stub typecheck.
+#   3. build — esbuild (core + browser), verify lib/ is in sync.
+#   4. test  — vitest (SSRF guard, store, enrichment/platform SSRF, browser).
 #
 # The build (esbuild) is the authoritative gate: it bundles the real code and
-# fails on syntax/import errors. The typecheck is a best-effort static check
-# against the stubs.
+# fails on syntax/import errors. The host typecheck is the strictest static
+# check (real host types, not stubs).
 
 image: node:22
 
@@ -33,6 +36,30 @@ typecheck:
         - "src/**/*"
         - "browser/src/**/*"
         - "types/**/*"
+        - "tsconfig.json"
+        - "browser/tsconfig.json"
+        - "package.json"
+
+# BLOCKING strict typecheck against the real DSH host source types. The host
+# is shallow-cloned and its deps installed so the host's third-party imports
+# resolve; the @deepseek-ai/* peer deps map to the host's sources via the
+# host's own paths map (no lib/ build needed).
+typecheck-host:
+  stage: typecheck
+  script:
+    - npm install $NPM_FLAGS
+    - git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness.git deepseek-harness
+    - cd deepseek-harness
+    - corepack enable
+    - pnpm install --no-frozen-lockfile --ignore-scripts --no-audit
+    - cd ..
+    - DSH_HOST=$CI_PROJECT_DIR/deepseek-harness npm run typecheck:host
+  rules:
+    - changes:
+        - "src/**/*"
+        - "browser/src/**/*"
+        - "types/**/*"
+        - "scripts/**/*"
         - "tsconfig.json"
         - "browser/tsconfig.json"
         - "package.json"

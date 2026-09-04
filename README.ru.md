@@ -27,6 +27,17 @@ pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git
 
 > Peer-зависимости `@deepseek-ai/*` предоставляются вашей установкой DSH (резолвятся из workspace). Если вы устанавливаете плагин в проект, где ещё нет пакетов DSH, сначала установите DSH, чтобы peers резолвились к версиям хоста.
 
+### Быстрый старт: оверлей `local-web.cordis.yml`
+
+В репозитории есть готовый оверлей [`local-web.cordis.yml`](local-web.cordis.yml): он фиксирует `web`-seam на провайдерах плагина, включает `web_fetch` в строке `tool-web` хоста и регистрирует плагин. Примените его поверх стандартного DSH-деплоя:
+
+```sh
+dsh --patch "$PWD/local-web.cordis.yml"        # TUI
+dsh web --patch "$PWD/local-web.cordis.yml"    # web GUI
+```
+
+Фиксация seam **обязательна**: без неё seam видит два пригодных search-провайдера (дефолт деплоя + `multi`) и падает с `WEB_PROVIDER_AMBIGUOUS`.
+
 ### Опционально: browser automation
 
 Подпакет [`dsh-web-browser`](browser/) добавляет локальный Chromium (Playwright) автоматизацию за tool `browser_*` (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). Он вынесен отдельно, потому что тянет Playwright + загрузку Chromium.
@@ -70,6 +81,14 @@ npx playwright install chromium
 
 Все поля имеют значения по умолчанию, поэтому пустой `config: {}` (или отсутствие `config`) включает полный локальный web-стек с keyless-движками.
 
+## Отношение к встроенным web-пакетам DSH
+
+Этот плагин — **внешняя standalone-копия** внутренних web-пакетов DSH (`web-search-multi`, `web-fetch-cached`, `web-platforms`, `web-store`, `web-browser`, `tool-web-history`) и на данный момент **впереди upstream** (SearXNG-движок, news-mode freshness, embedding re-rank, LRU-эвакуация, SSRF-guard, inline-скриншоты).
+
+- **Взаимное исключение**: плагин и встроенные пакеты регистрируют одни и те же provider id (`multi`, `cached-http`) и имена tool. Деплой, загружающий оба, падает при старте с `WEB_DUPLICATE_PROVIDER` — оставляйте один. Если используете этот плагин, **не** применяйте оверлей DSH `examples/web-local` (и его preset-копии), и наоборот.
+- **Tools даёт хост**: `web_search` и `web_fetch` регистрируются плагин-хостом `tool-web`; этот плагин регистрирует **провайдеров** за ними (плюс `web_platform_search` и history-tools). Оверлей выше включает `web_fetch` в строке `tool-web`.
+- **Расхождение с upstream**: плагин эволюционирует независимо, поэтому его поведение может расходиться со встроенными пакетами со временем. Шапки модулей в `src/` помечают upstream-пакет, которому соответствует каждый модуль.
+
 ## API-ключи (опционально)
 
 Keyless-движки (DuckDuckGo, Bing) работают без конфигурации. Чтобы включить Exa / DeepSeek / Jina, предоставьте их API-ключи:
@@ -89,7 +108,16 @@ Keyless-движки (DuckDuckGo, Bing) работают без конфигур
 
 ## Безопасность
 
-- **SSRF-guard** (включён по умолчанию): `web_fetch` блокирует запросы к loopback, private, link-local и другим зарезервированным сетевым целям. Проверка выполняется на литеральном хосте и после DNS-резолва (против rebinding). Отключите через `fetch.allowPrivateNetworks: true` только в доверенной, сетевы-изолированной среде.
+- **SSRF-guard** (включён по умолчанию): запросы к loopback, private, link-local и другим зарезервированным сетевым целям (IPv4 `0/8`, `10/8`, `127/8`, `172.16/12`, `169.254/16`, `192.168/16`; IPv6 `::1`, `::/128`, `fe80::/10`, `fc00::/7`) блокируются. Проверка выполняется на литеральном хосте **и** после DNS-резолва (против rebinding), а для `web_fetch`/enrichment — на каждом hop-е редиректа (макс. 5). Защищённые пути и их флаги:
+  | Путь | Флаг |
+  |---|---|
+  | `web_fetch` (cached fetch provider) | `fetch.allowPrivateNetworks` |
+  | search enrichment (запросы страниц для сниппетов) | `search.allowPrivateNetworks` |
+  | запросы `web_platform_search` (вкл. RSS feed URL) | `platforms.allowPrivateNetworks` |
+  | `browser_navigate` (Playwright) | `allowPrivateNetworks` в конфиге `dsh-web-browser` |
+
+  Ставьте соответствующий флаг в `true` только в доверенной, сетевы-изолированной среде.
+- **Browser approval** (fail-closed): `browser_open`/`browser_navigate` требуют approval согласно настройке `approval` в `dsh-web-browser` (`never` | `once` | `always`). Если approval-сервис недоступен или у вызова нет agent для маршрутизации, действие **отказывается**, а не разрешается молча.
 - **Эвакуация кэша** (LRU по использованию): хранилище хранит не более `fetch.cacheMaxPages` страниц (default 500) и `search.cacheMaxSearches` поисков (default 1000), эвакуируя наименее недавно использованные после каждой записи. Это ограничивает рост `web.db` со временем.
 
 ## Известные ограничения
@@ -131,12 +159,25 @@ dsh-web-automation:
     freshness: 24h    # 24h | week | month | year
 ```
 
+## Smoke-тест
+
+После установки и применения оверлея проверьте стек end-to-end (в DSH-сессии):
+
+1. `web_search "hello world"` — возвращает источники (DDG/Bing keyless).
+2. `web_fetch https://example.com` дважды — второй вызов — cache hit (без сети; см. `web_search_stats`).
+3. `web_platform_search { platform: "github", query: "schemastery" }` — возвращает GitHub-источники.
+4. `web_history` — показывает поиски/загрузки выше.
+5. `web_fetch http://127.0.0.1/` — падает с `WEB_SSRF_BLOCKED` (SSRF-guard).
+6. (с `dsh-web-browser`) `browser_open` → `browser_navigate https://example.com` → `browser_screenshot` → `browser_close` — файл скриншота появляется в temp-каталоге.
+
 ## Troubleshooting
 
 | Симптом | Причина | Решение |
 |---|---|---|
 | `ERESOLVE` peer conflict при установке | Peer deps отсутствуют вне DSH-деплоя | `npm install --legacy-peer-deps` |
 | `Cannot find module '@deepseek-ai/...'` | Плагин установлен без пакетов DSH | Сначала установите DSH (peers резолвятся к версиям хоста) |
+| `WEB_PROVIDER_AMBIGUOUS` при старте | `web`-seam видит два пригодных search-провайдера | Добавьте строку фикса `web`-seam (`searchProvider: multi`, `fetchProvider: cached-http`) — см. оверлей |
+| `WEB_DUPLICATE_PROVIDER` при старте | Загружены и плагин, и встроенные web-пакеты DSH | Оставьте один — удалите встроенные строки (или строку плагина); см. «Отношение к встроенным web-пакетам DSH» |
 | `web_fetch` заблокирован (SSRF) | Цель — loopback/private/link-local | `fetch.allowPrivateNetworks: true` (только в доверенной среде) |
 | SearXNG возвращает non-JSON | JSON API не включён на инстансе | Добавьте `search.formats: [html, json]` в `settings.yml` SearXNG |
 | Embedding re-rank откатывается на BM25 | Embedding endpoint недоступен | Проверьте URL + имя модели; BM25 — fallback |

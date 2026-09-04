@@ -7,6 +7,7 @@
  * @module @deepseek-ai/dsh-web-platforms/builtins
  */
 
+import { BROWSER_LIKE_USER_AGENT, PRODUCT_USER_AGENT } from '../user-agent.ts'
 import type { Platform } from './types.ts'
 
 /** GitHub repository search via the public REST API (keyless, rate-limited). */
@@ -17,7 +18,7 @@ const GITHUB: Platform = {
   searchUrl: 'https://api.github.com/search/repositories?q={query}&per_page={limit}',
   headers: {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'deepseek-harness/0.1.1 (web_platform_search)',
+    'User-Agent': PRODUCT_USER_AGENT,
   },
   fields: {
     items: 'items',
@@ -36,7 +37,7 @@ const REDDIT: Platform = {
   format: 'json',
   searchUrl: 'https://www.reddit.com/search.json?q={query}&limit={limit}&sort=relevance',
   headers: {
-    'User-Agent': 'deepseek-harness/0.1.1 (web_platform_search)',
+    'User-Agent': PRODUCT_USER_AGENT,
   },
   fields: {
     items: 'data.children',
@@ -58,7 +59,7 @@ const YOUTUBE: Platform = {
   format: 'json-in-html',
   searchUrl: 'https://www.youtube.com/results?search_query={query}&hl=en',
   headers: {
-    'User-Agent': 'Mozilla/5.0 (compatible; deepseek-harness/0.1.1)',
+    'User-Agent': BROWSER_LIKE_USER_AGENT,
   },
   jsonInHtml: {
     marker: 'ytInitialData = ',
@@ -84,7 +85,7 @@ const BILIBILI: Platform = {
   format: 'json',
   searchUrl: 'https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={query}',
   headers: {
-    'User-Agent': 'Mozilla/5.0 (compatible; deepseek-harness/0.1.1)',
+    'User-Agent': BROWSER_LIKE_USER_AGENT,
     Referer: 'https://www.bilibili.com',
   },
   fields: {
@@ -104,7 +105,7 @@ const V2EX: Platform = {
   format: 'html',
   searchUrl: 'https://www.v2ex.com/?q={query}',
   headers: {
-    'User-Agent': 'Mozilla/5.0 (compatible; deepseek-harness/0.1.1)',
+    'User-Agent': BROWSER_LIKE_USER_AGENT,
   },
   selectors: {
     item: 'div.cell.item',

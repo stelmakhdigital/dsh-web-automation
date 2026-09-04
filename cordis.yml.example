@@ -3,12 +3,38 @@
 # 1. Install the package next to your DSH deployment (same node_modules tree),
 #    e.g. from this GitHub repo:
 #
-#       npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git
+#       pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git
 #
-# 2. Add a row to your deployment's cordis.yml (or an overlay applied with
-#    `dsh --patch ...`). Every field is defaulted, so an empty config enables
-#    the full local web stack with the keyless engines (DuckDuckGo + Bing).
+# 2. Add the rows below to your deployment's cordis.yml (or an overlay applied
+#    with `dsh --patch ...`). Every field is defaulted, so an empty config
+#    enables the full local web stack with the keyless engines (DuckDuckGo +
+#    Bing).
 #
+#    NOTE: this plugin is MUTUALLY EXCLUSIVE with the DSH built-in web
+#    packages (web-search-multi / web-fetch-cached / web-platforms /
+#    tool-web-history / web-browser, e.g. via the DSH examples/web-local
+#    overlay). Registering both fails with WEB_DUPLICATE_PROVIDER — keep one.
+#    The `web` seam row below is REQUIRED: without it the seam sees two usable
+#    search providers and fails with WEB_PROVIDER_AMBIGUOUS.
+#
+# 3. (Optional) Browser automation — a separate sub-package:
+#
+#       pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
+#       npx playwright install chromium
+#
+#    then add the `web-browser` row at the bottom of this file.
+#
+- id: web
+  config:
+    searchProvider: multi
+    fetchProvider: cached-http
+
+- id: tool-web
+  config:
+    fetch: true
+    searchTimeoutMs: 60000
+    fetchTimeoutMs: 45000
+
 - id: web-automation
   name: 'dsh-web-automation'
   config:
@@ -27,6 +53,7 @@
       # exa:      { apiKeyEnv: EXA_API_KEY }        # or apiKey: '...'
       # deepseek: { apiKeyEnv: DEEPSEEK_API_KEY }
       # jina:     { apiKeyEnv: JINA_API_KEY }
+      # allowPrivateNetworks: false  # SSRF guard for enrichment fetches (set true only in isolated envs)
     fetch:
       revalidate: true          # conditional revalidation for fresh-but-expired pages
       # cacheTtlMs: 21600000    # page cache TTL (6 h)
@@ -45,7 +72,21 @@
       #     fields: { items: 'data.results', url: 'link', title: 'title' }
       # rulePackPaths:          # versioned rule-pack JSON files (hot-reloaded by mtime)
       #   - '$DSH_HOME/web-platforms/packs.json'
+      # allowPrivateNetworks: false  # SSRF guard for platform fetches (set true only in isolated envs)
     history:
       history: true             # register web_history
       cacheClear: true          # register web_cache_clear
       stats: true               # register web_search_stats
+
+# Browser automation (separate sub-package, see step 3 above):
+#
+# - id: web-browser
+#   name: 'dsh-web-browser'
+#   config:
+#     tool: true                # register the browser_* tools
+#     headless: true            # run Chromium headless
+#     approval: never           # never | once | always — per-navigation approval
+#     # timeoutMs: 30000        # per-action deadline (ms)
+#     # maxTextLength: 50000    # cap on extracted page text (chars)
+#     # maxElements: 200        # cap on snapshot elements
+#     # allowPrivateNetworks: false  # SSRF guard for navigation (set true only in isolated envs)

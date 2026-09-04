@@ -1,8 +1,14 @@
 /**
  * `JinaEngine`: a search engine backed by the Jina search API
- * (`https://s.jina.ai/{query}`). Requires a Jina API key (resolved at plugin
- * `apply` time); without one the engine reports itself unavailable and the
- * router skips it.
+ * (`https://s.jina.ai/{query}`). Requires a Jina API key, resolved from the
+ * config override or the launch environment at plugin `apply` time and
+ * re-resolved per search when a resolver is set (the credentials domain, so
+ * a key written there takes effect without a restart).
+ *
+ * `available()` reports *potentially* available: true when a static key is
+ * present OR a resolver is set (the resolver may yield a key at search time).
+ * A search issued without any key fails with a provider error, which the
+ * router's cooldown handles — the engine is not silently skipped.
  * @module @deepseek-ai/dsh-web-search-multi/engines/jina
  */
 
@@ -13,7 +19,7 @@ import type { EngineSearchResult, SearchEngine } from './types.ts'
 
 /** Engine options. */
 export interface JinaEngineOptions {
-  /** Resolved Jina API key (empty makes the engine unavailable). */
+  /** Resolved Jina API key (empty is fine when a resolver may yield one). */
   apiKey?: string
   /**
    * Resolve the key per search (credential reference over the launch

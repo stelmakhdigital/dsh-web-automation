@@ -67,6 +67,12 @@ export interface Config {
   platforms?: unknown[]
   /** Rule-pack JSON file paths (highest precedence; hot-reloaded). */
   rulePackPaths?: string[]
+  /**
+   * Allow platform fetches to private/reserved network targets (loopback,
+   * LAN, link-local). Defaults to false: the SSRF guard blocks these. Enable
+   * only in a trusted, network-isolated environment.
+   */
+  allowPrivateNetworks?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -76,6 +82,7 @@ export const Config: z<Config> = z.object({
   maxBytes: z.number().default(DEFAULT_PLATFORM_MAX_BYTES),
   platforms: z.array(z.any()).default([]),
   rulePackPaths: z.array(z.string()).default([]),
+  allowPrivateNetworks: z.boolean().default(false),
 })
 
 /** Complete config after schemastery applies every field default. */
@@ -193,7 +200,7 @@ export function apply(ctx: Context, config: Config): void {
     async execute(args, exec) {
       const result = await searchPlatform(
         { platform: args.platform, query: args.query, ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) },
-        { registry, timeoutMs: resolved.timeoutMs, maxBytes: resolved.maxBytes, maxResults: resolved.maxResults },
+        { registry, timeoutMs: resolved.timeoutMs, maxBytes: resolved.maxBytes, maxResults: resolved.maxResults, allowPrivateNetworks: resolved.allowPrivateNetworks },
         exec.signal,
       )
       return {

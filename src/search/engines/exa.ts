@@ -1,9 +1,15 @@
 /**
  * `ExaEngine`: wraps the `ExaSearchProvider` from
  * `@deepseek-ai/dsh-web-search-exa` as a routing engine. The API key is
- * resolved once at plugin `apply` time (config override or launch
- * environment); without a key the engine reports itself unavailable and the
- * router skips it.
+ * resolved from the config override or the launch environment at plugin
+ * `apply` time, and re-resolved per search when a resolver is set (the
+ * credentials domain, so a key written there takes effect without a
+ * restart).
+ *
+ * `available()` reports *potentially* available: true when a static key is
+ * present OR a resolver is set (the resolver may yield a key at search time).
+ * A search issued without any key fails with a provider error, which the
+ * router's cooldown handles — the engine is not silently skipped.
  * @module @deepseek-ai/dsh-web-search-multi/engines/exa
  */
 
@@ -12,7 +18,7 @@ import type { EngineSearchResult, SearchEngine } from './types.ts'
 
 /** Engine options. */
 export interface ExaEngineOptions {
-  /** Resolved Exa API key (empty makes the engine unavailable). */
+  /** Resolved Exa API key (empty is fine when a resolver may yield one). */
   apiKey?: string
   /**
    * Resolve the key per search (credential reference over the launch

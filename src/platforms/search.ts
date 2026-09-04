@@ -9,6 +9,7 @@
 
 import { WebError } from '@deepseek-ai/dsh-web'
 import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { fetchPublic, SsrfBlockedError } from '../fetch/ssrf.ts'
 import { parseHtmlResults } from './parse-html.ts'
 import { extractJsonAfterMarker, parseJsonResults } from './parse-json.ts'
 import { parseRssResults } from './parse-rss.ts'
@@ -26,6 +27,12 @@ export interface PlatformSearchDeps {
   maxBytes: number
   /** The tool-level result cap (clamps `limit`). */
   maxResults: number
+  /**
+   * Allow platform fetches to private/reserved network targets (loopback,
+   * LAN, link-local). Defaults to false: the SSRF guard blocks these. The
+   * guard matters for the `rss` platform, whose query IS the fetched URL.
+   */
+  allowPrivateNetworks: boolean
 }
 
 /**
@@ -86,14 +93,30 @@ function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
   return out
 }
 
-/** Fetch one URL and return its body text, enforcing the deadline and byte cap. */
-async function fetchText(url: string, headers: Record<string, string> | undefined, signal: AbortSignal, maxBytes: number): Promise<string> {
+/**
+ * Fetch one URL and return its body text, enforcing the deadline and byte
+ * cap. The request goes through the SSRF guard (initial URL + every redirect
+ * hop): the `rss` platform fetches the query as a URL, so a model-supplied
+ * `http://169.254.169.254/...` is blocked here rather than probed.
+ */
+async function fetchText(
+  url: string,
+  headers: Record<string, string> | undefined,
+  signal: AbortSignal,
+  maxBytes: number,
+  allowPrivateNetworks: boolean,
+): Promise<string> {
   let response: Response
   try {
-    const init: RequestInit = { signal, redirect: 'follow' }
-    if (headers !== undefined) init.headers = headers
-    response = await fetch(url, init)
+    response = await fetchPublic(url, {
+      allowPrivate: allowPrivateNetworks,
+      ...headers !== undefined ? { headers } : {},
+      signal,
+    })
   } catch (error) {
+    if (error instanceof SsrfBlockedError) {
+      throw new WebError(`request to ${url} blocked by the SSRF guard: ${error.reason}`, 'WEB_SSRF_BLOCKED', { cause: error })
+    }
     throw classifyPlatformError(error, signal, `fetch ${url}`)
   }
   if (!response.ok) {
@@ -156,7 +179,7 @@ export async function searchPlatform(
   }
 
   using d = deadline(signal, deps.timeoutMs, 'WEB_SEARCH_TIMEOUT')
-  const body = await fetchText(url, platform.headers, d.signal, deps.maxBytes)
+  const body = await fetchText(url, platform.headers, d.signal, deps.maxBytes, deps.allowPrivateNetworks)
   const parsed = parseByFormat(platform, body, url)
 
   const cap = platform.maxResults !== undefined ? Math.min(limit, platform.maxResults) : limit

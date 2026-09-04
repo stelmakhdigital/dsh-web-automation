@@ -16,8 +16,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-web'
+import { WebError } from '@deepseek-ai/dsh-web'
 import { WebStore } from '../store/index.ts'
+import { PRODUCT_USER_AGENT } from '../user-agent.ts'
 import { CachedHttpFetchProvider } from './provider.ts'
 import type { CachedFetchLimits } from './provider.ts'
 
@@ -25,7 +26,7 @@ export { CACHED_FETCH_PROVIDER_ID, CachedHttpFetchProvider } from './provider.ts
 export type { CachedFetchLimits } from './provider.ts'
 
 /** Default `User-Agent`: an explicit product agent, never a browser disguise. */
-export const DEFAULT_USER_AGENT = 'deepseek-harness/0.0.1 (+https://github.com/deepseek-ai)'
+export const DEFAULT_USER_AGENT = PRODUCT_USER_AGENT
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'web-fetch-cached'
@@ -107,8 +108,14 @@ function assertNonNegativeInteger(name: string, value: number): void {
   }
 }
 
+/** Optional apply options (used when the top-level plugin shares one store). */
+export interface ApplyOptions {
+  /** A shared store to use instead of creating one (caps are merged in). */
+  store?: WebStore
+}
+
 /** Register the cached HTTP(S) fetch provider with `ctx.web`. */
-export function apply(ctx: Context, config: Config): void {
+export function apply(ctx: Context, config: Config, options: ApplyOptions = {}): void {
   // schemastery (Config) has already filled every defaulted field.
   const resolved = config as ResolvedConfig
   assertPositiveFinite('maxUrlLength', resolved.maxUrlLength)
@@ -118,6 +125,26 @@ export function apply(ctx: Context, config: Config): void {
   assertNonNegativeInteger('maxRedirects', resolved.maxRedirects)
   assertPositiveFinite('cacheTtlMs', resolved.cacheTtlMs)
   assertNonNegativeInteger('cacheMaxPages', resolved.cacheMaxPages)
+  let store: WebStore
+  if (options.store !== undefined) {
+    // Shared store (owned by the top-level plugin): merge this module's
+    // resolved cap — the settings section is the authoritative source.
+    options.store.setEvictLimits({ maxPages: resolved.cacheMaxPages })
+    store = options.store
+  } else {
+    // Standalone: own the store and close it when this plugin's fiber is
+    // disposed (HMR / context teardown).
+    const owned = new WebStore({
+      path: config.storePath ?? dshHomePath('web.db'),
+      evictLimits: { maxPages: resolved.cacheMaxPages },
+    })
+    ctx.effect(function* () {
+      yield () => {
+        void owned.close()
+      }
+    }, 'web-fetch-cached.store.close()')
+    store = owned
+  }
   const limits: CachedFetchLimits = {
     maxUrlLength: resolved.maxUrlLength,
     maxResponseBytes: resolved.maxResponseBytes,
@@ -126,12 +153,24 @@ export function apply(ctx: Context, config: Config): void {
     maxRedirects: resolved.maxRedirects,
     userAgent: resolved.userAgent,
     cacheTtlMs: resolved.cacheTtlMs,
-    store: new WebStore({
-      path: config.storePath ?? dshHomePath('web.db'),
-      evictLimits: { maxPages: resolved.cacheMaxPages },
-    }),
+    store,
     revalidate: resolved.revalidate,
     allowPrivateNetworks: resolved.allowPrivateNetworks,
   }
-  ctx.web.registerFetchProvider(new CachedHttpFetchProvider(limits))
+  try {
+    ctx.web.registerFetchProvider(new CachedHttpFetchProvider(limits))
+  } catch (error) {
+    // A duplicate id means the deployment ALSO loads DSH's built-in
+    // web-fetch-cached (e.g. via the local-web overlay). The plugin and the
+    // built-in packages are mutually exclusive — say so, instead of surfacing
+    // the bare seam error.
+    if (error instanceof WebError && error.code === 'WEB_DUPLICATE_PROVIDER') {
+      throw new WebError(
+        'the "cached-http" fetch provider is already registered: the dsh-web-automation plugin and DSH built-in web packages (e.g. the local-web overlay) are mutually exclusive — keep one',
+        'WEB_DUPLICATE_PROVIDER',
+        { cause: error },
+      )
+    }
+    throw error
+  }
 }

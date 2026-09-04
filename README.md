@@ -94,11 +94,15 @@ Once installed and configured, the model can:
 - **All state is local**: the store is `$DSH_HOME/web.db`, nothing is sent anywhere else.
 - **Caveat**: scraping public SERPs may violate a search engine's terms of service; the provider sends an explicit product `User-Agent`, rate-limits itself (1 req/s per engine by default), and cools down blocked engines. Use responsibly.
 
+## Security
+
+- **SSRF guard** (on by default): `web_fetch` blocks requests to loopback, private, link-local, and otherwise reserved network targets. The check runs on the literal host and after DNS resolution (against rebinding). Set `fetch.allowPrivateNetworks: true` to disable the guard in a trusted, network-isolated environment.
+- **Cache eviction** (LRU by usage): the store keeps at most `fetch.cacheMaxPages` page records (default 500) and `search.cacheMaxSearches` search records (default 1000), evicting the least-recently-accessed beyond the cap after each write. This keeps `web.db` bounded over time.
+
 ## Known limitations
 
-- SSRF / private-network protection is deferred (web seam); do not enable the fetch provider where it can reach sensitive internal targets.
 - HTML SERP parsing is brittle; markup changes degrade to zero results until the parser updates (block detection converts silent empties into cooldowns).
-- No cache size cap.
+- The plugin runs in the host DSH process with the host's privileges (a trusted static package); it is not sandboxed. Run DSH as a normal user, and in a network-isolated container/VM if the plugin may reach sensitive targets.
 - Browser automation: one tab per agent session; screenshots are written to a file (not inlined).
 
 ## License

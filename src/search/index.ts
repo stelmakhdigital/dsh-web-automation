@@ -90,6 +90,12 @@ export interface Config {
   pageCacheTtlMs?: number
   /** SQLite store path. Defaults to `$DSH_HOME/web.db`. */
   storePath?: string
+  /**
+   * Maximum number of search records kept in the store (LRU by last access).
+   * Oldest (least-recently-accessed) searches beyond this cap are evicted
+   * after each write. Defaults to 1000.
+   */
+  cacheMaxSearches?: number
   /** Search-request rate limit per engine (requests per second). */
   rateLimitPerSec?: number
   /** `User-Agent` header sent on every request. */
@@ -122,6 +128,7 @@ export const Config: z<Config> = z.object({
   snippetChars: z.number().default(300),
   searchCacheTtlMs: z.number().default(900_000),
   pageCacheTtlMs: z.number().default(21_600_000),
+  cacheMaxSearches: z.number().default(1000),
   rateLimitPerSec: z.number().default(1),
   userAgent: z.string().default(DEFAULT_USER_AGENT),
   blockedDomains: z.array(z.string()).default([]),
@@ -147,6 +154,13 @@ function assertTimeoutMs(value: number): void {
   assertPositiveFinite('timeoutMs', value)
   if (value > MAX_NODE_TIMER_DELAY_MS) {
     throw new Error(`web-search-multi: timeoutMs must be no greater than ${MAX_NODE_TIMER_DELAY_MS}`)
+  }
+}
+
+/** A count cap must be a non-negative integer (0 disables the cap). */
+function assertNonNegativeInteger(name: string, value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`web-search-multi: ${name} must be a non-negative integer`)
   }
 }
 
@@ -206,6 +220,7 @@ export function apply(ctx: Context, config: Config): void {
   assertTimeoutMs(resolved.timeoutMs)
   assertPositiveFinite('cooldownBaseMs', resolved.cooldownBaseMs)
   assertPositiveFinite('cooldownMaxMs', resolved.cooldownMaxMs)
+  assertNonNegativeInteger('cacheMaxSearches', resolved.cacheMaxSearches)
 
   // Runtime guard for direct `apply` callers that bypass schemastery.
   const mode: string = resolved.mode
@@ -213,7 +228,10 @@ export function apply(ctx: Context, config: Config): void {
     throw new Error(`web-search-multi: mode must be "fallback" or "fuse", got "${mode}"`)
   }
   const env = launchEnvironmentOf(ctx)
-  const store = new WebStore({ path: config.storePath ?? dshHomePath('web.db') })
+  const store = new WebStore({
+    path: config.storePath ?? dshHomePath('web.db'),
+    evictLimits: { maxSearches: resolved.cacheMaxSearches },
+  })
   const engines: SearchEngine[] = [
     new DuckDuckGoEngine({
       endpoint: DUCKDUCKGO_DEFAULT_ENDPOINT,

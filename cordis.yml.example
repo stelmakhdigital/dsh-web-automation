@@ -17,6 +17,7 @@
       mode: fallback            # fallback = first success wins; fuse = parallel + RRF merge
       region: ''                # region/market hint (DDG kl, Bing setmkt)
       enrich: true              # enrich top results with fetched page text + BM25 re-rank
+      # cacheMaxSearches: 1000  # LRU cap on search records (evict least-recently-accessed beyond this)
       # Per-engine API keys (opt-in; keyless engines need none):
       # exa:      { apiKeyEnv: EXA_API_KEY }        # or apiKey: '...'
       # deepseek: { apiKeyEnv: DEEPSEEK_API_KEY }
@@ -24,6 +25,8 @@
     fetch:
       revalidate: true          # conditional revalidation for fresh-but-expired pages
       # cacheTtlMs: 21600000    # page cache TTL (6 h)
+      # cacheMaxPages: 500      # LRU cap on page records (evict least-recently-accessed beyond this)
+      # allowPrivateNetworks: false  # SSRF guard: block loopback/private/link-local (set true only in isolated envs)
     platforms:
       tool: true                # register web_platform_search
       maxResults: 20            # cap on sources per call

@@ -10,10 +10,12 @@
  * the search provider's enrichment (same `web_pages` table), so a page
  * fetched by `web_fetch` is reused by `web_search` and vice versa.
  *
- * Private-network and SSRF protection is not implemented (inherited
- * limitation); do not enable this provider where it can reach sensitive
- * internal targets.
- * @module @deepseek-ai/dsh-web-fetch-cached/provider
+ * Private-network and SSRF protection is enforced by default: the guard
+ * blocks requests to loopback, private, link-local, and otherwise reserved
+ * targets (checked on the literal host and after DNS resolution, against
+ * rebinding). Set `allowPrivateNetworks: true` to disable the guard in a
+ * trusted, network-isolated environment.
+ * @module dsh-web-automation/fetch/provider
  */
 
 import { WebError } from '@deepseek-ai/dsh-web'
@@ -22,6 +24,7 @@ import { deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { StoredPage, WebStore } from '../store/index.ts'
 import { classifyContentType, decoderForCharset, isSameOrigin, parseCharset, validateFetchUrl } from './policy.ts'
 import { normalizeUrl } from './url.ts'
+import { checkSsrf } from './ssrf.ts'
 
 /** Resolved provider limits and cache settings. */
 export interface CachedFetchLimits {
@@ -43,6 +46,13 @@ export interface CachedFetchLimits {
   store: WebStore
   /** Issue conditional revalidation requests for fresh-but-expired entries. */
   revalidate: boolean
+  /**
+   * Allow requests to private/reserved network targets (loopback, LAN,
+   * link-local). Defaults to false: the SSRF guard blocks these so the
+   * plugin cannot probe internal infrastructure. Enable only in a trusted,
+   * network-isolated environment (e.g. a container with no internal routes).
+   */
+  allowPrivateNetworks: boolean
 }
 
 /** Stable id this provider registers under. */
@@ -71,6 +81,7 @@ export class CachedHttpFetchProvider implements WebFetchProvider {
   async fetch(request: WebFetchRequest, signal?: AbortSignal): Promise<WebFetchResult> {
     if (signal?.aborted) throw new WebError('web fetch aborted', 'WEB_ABORTED')
     const url = validateFetchUrl(request.url, this.limits.maxUrlLength)
+    await this.assertPublic(url)
     const key = normalizeUrl(url.toString())
     const cached = await this.limits.store.readPage(key).catch(() => undefined)
     if (cached !== undefined && Date.now() - cached.fetchedAt < this.limits.cacheTtlMs) {
@@ -79,6 +90,19 @@ export class CachedHttpFetchProvider implements WebFetchProvider {
     }
     using d = deadline(signal, this.limits.timeoutMs, 'WEB_FETCH_TIMEOUT')
     return await this.fetchFresh(url, d.signal)
+  }
+
+  /**
+   * Assert a URL is public (not a private/reserved network target). Throws a
+   * `WEB_SSRF_BLOCKED` error when the guard blocks the URL. The check runs on
+   * the literal host and after DNS resolution (against rebinding).
+   * @param url - the URL to check.
+   */
+  private async assertPublic(url: URL): Promise<void> {
+    const check = await checkSsrf(url.toString(), { allowPrivate: this.limits.allowPrivateNetworks })
+    if (!check.allowed) {
+      throw new WebError(`request to ${url.host} blocked by the SSRF guard: ${check.reason}`, 'WEB_SSRF_BLOCKED')
+    }
   }
 
   /** Fetch from the network, cache a 2xx result, and return it. */

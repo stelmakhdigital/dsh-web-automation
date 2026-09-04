@@ -16,12 +16,18 @@
 import { mkdir } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { WEB_STORE_SCHEMA, WEB_STORE_SCHEMA_VERSION } from './schema.ts'
+import { WEB_STORE_MIGRATIONS, WEB_STORE_SCHEMA, WEB_STORE_SCHEMA_VERSION } from './schema.ts'
 
 /** Store configuration. */
 export interface WebStoreOptions {
   /** Path to the SQLite file, or `':memory:'` for an in-memory database. */
   path: string
+  /**
+   * LRU eviction caps. When set, the store evicts the least-recently-accessed
+   * entries beyond these caps after each write (a no-op when within the cap).
+   * Keeps the store bounded so `web.db` does not grow unbounded over time.
+   */
+  evictLimits?: { maxSearches?: number; maxPages?: number }
 }
 
 /** One stored search record (history + search cache). */
@@ -177,37 +183,70 @@ export class WebStore {
     const db = new DatabaseSync(this.options.path)
     db.exec('PRAGMA journal_mode = WAL')
     db.exec(WEB_STORE_SCHEMA)
-    db.prepare('INSERT OR IGNORE INTO web_meta (key, value) VALUES (?, ?)').run(
+    this.migrate(db)
+    return db
+  }
+
+  /**
+   * Apply pending schema migrations. Reads the stored version; if it is older
+   * than {@link WEB_STORE_SCHEMA_VERSION}, runs each migration in order and
+   * records the new version. A missing version (a brand-new or pre-versioning
+   * file) is treated as version 1 (the schema DDL has already created the
+   * current shape, so only the ALTER-based migrations run).
+   * @param db - the open database handle.
+   */
+  private migrate(db: DatabaseSync): void {
+    const row = db.prepare('SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string } | undefined
+    const current = row === undefined ? 1 : Number(row.value)
+    if (current >= WEB_STORE_SCHEMA_VERSION) return
+    for (const migration of WEB_STORE_MIGRATIONS) {
+      if (migration.from < current) continue
+      if (migration.from >= WEB_STORE_SCHEMA_VERSION) break
+      db.exec(migration.up)
+    }
+    db.prepare('INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
       'schema_version',
       String(WEB_STORE_SCHEMA_VERSION),
     )
-    return db
   }
 
   /** Insert or replace one search record. Returns the row id. */
   async recordSearch(entry: SearchRecordInput): Promise<number> {
     const db = await this.ensureOpen()
+    const now = Date.now()
     const result = db
       .prepare(
-        'INSERT OR REPLACE INTO web_searches (cache_key, query, engines, created_at, sources, truncated, content) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        `INSERT INTO web_searches (cache_key, query, engines, created_at, last_accessed_at, sources, truncated, content)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(cache_key) DO UPDATE SET
+           query = excluded.query,
+           engines = excluded.engines,
+           last_accessed_at = excluded.last_accessed_at,
+           sources = excluded.sources,
+           truncated = excluded.truncated,
+           content = excluded.content`,
       )
       .run(
         entry.cacheKey,
         entry.query,
         JSON.stringify(entry.engines),
         entry.createdAt,
+        now,
         JSON.stringify(entry.sources),
         entry.truncated ? 1 : 0,
         entry.content ?? null,
       )
+    this.maybeEvict(db)
     return Number(result.lastInsertRowid)
   }
 
-  /** Read one search record by cache key. */
+  /** Read one search record by cache key (and mark it accessed for LRU). */
   async readSearch(cacheKey: string): Promise<StoredSearch | undefined> {
     const db = await this.ensureOpen()
     const row = db.prepare('SELECT * FROM web_searches WHERE cache_key = ?').get(cacheKey) as SearchRow | undefined
-    return row === undefined ? undefined : mapSearchRow(row)
+    if (row === undefined) return undefined
+    db.prepare('UPDATE web_searches SET last_accessed_at = ? WHERE id = ?').run(Date.now(), row.id)
+    return mapSearchRow(row)
   }
 
   /** Recent search history, newest first. */
@@ -229,13 +268,15 @@ export class WebStore {
   /** Insert or update one page record by normalized URL. Returns the row id. */
   async recordPage(entry: PageRecordInput): Promise<number> {
     const db = await this.ensureOpen()
+    const now = Date.now()
     const result = db
       .prepare(
-        `INSERT INTO web_pages (url, normalized_url, fetched_at, etag, last_modified, status_code, body_kind, body, truncated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO web_pages (url, normalized_url, fetched_at, last_accessed_at, etag, last_modified, status_code, body_kind, body, truncated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(normalized_url) DO UPDATE SET
            url = excluded.url,
            fetched_at = excluded.fetched_at,
+           last_accessed_at = excluded.last_accessed_at,
            etag = excluded.etag,
            last_modified = excluded.last_modified,
            status_code = excluded.status_code,
@@ -247,6 +288,7 @@ export class WebStore {
         entry.url,
         entry.normalizedUrl,
         entry.fetchedAt,
+        now,
         entry.etag ?? null,
         entry.lastModified ?? null,
         entry.statusCode,
@@ -254,14 +296,17 @@ export class WebStore {
         entry.body,
         entry.truncated ? 1 : 0,
       )
+    this.maybeEvict(db)
     return Number(result.lastInsertRowid)
   }
 
-  /** Read one page record by normalized URL. */
+  /** Read one page record by normalized URL (and mark it accessed for LRU). */
   async readPage(normalizedUrl: string): Promise<StoredPage | undefined> {
     const db = await this.ensureOpen()
     const row = db.prepare('SELECT * FROM web_pages WHERE normalized_url = ?').get(normalizedUrl) as PageRow | undefined
-    return row === undefined ? undefined : mapPageRow(row)
+    if (row === undefined) return undefined
+    db.prepare('UPDATE web_pages SET last_accessed_at = ? WHERE id = ?').run(Date.now(), row.id)
+    return mapPageRow(row)
   }
 
   /** Recent page history, newest first. */
@@ -302,6 +347,55 @@ export class WebStore {
       ...(searchesRow.last !== null ? { lastSearchAt: searchesRow.last } : {}),
       ...(pagesRow.last !== null ? { lastPageAt: pagesRow.last } : {}),
     }
+  }
+
+  /**
+   * Evict the least-recently-accessed entries beyond the given caps. Keeps at
+   * most `maxSearches` search records and `maxPages` page records, deleting
+   * the oldest (by `last_accessed_at`, then `id`) beyond each cap. A cap of 0
+   * deletes everything; an undefined cap leaves that table untouched. Returns
+   * the number of rows evicted per table.
+   * @param limits - the per-table entry caps.
+   */
+  async evict(limits: { maxSearches?: number; maxPages?: number }): Promise<{ searches: number; pages: number }> {
+    const db = await this.ensureOpen()
+    let searches = 0
+    let pages = 0
+    if (limits.maxSearches !== undefined) {
+      const result = db
+        .prepare(
+          `DELETE FROM web_searches WHERE id NOT IN (
+             SELECT id FROM web_searches ORDER BY last_accessed_at DESC, id DESC LIMIT ?
+           )`,
+        )
+        .run(limits.maxSearches)
+      searches = Number(result.changes)
+    }
+    if (limits.maxPages !== undefined) {
+      const result = db
+        .prepare(
+          `DELETE FROM web_pages WHERE id NOT IN (
+             SELECT id FROM web_pages ORDER BY last_accessed_at DESC, id DESC LIMIT ?
+           )`,
+        )
+        .run(limits.maxPages)
+      pages = Number(result.changes)
+    }
+    return { searches, pages }
+  }
+
+  /**
+   * Evict the least-recently-accessed entries beyond the configured caps (a
+   * no-op when no caps are set or the store is within the cap). Called after
+   * each write to keep the store bounded.
+   */
+  private maybeEvict(db: DatabaseSync): void {
+    const limits = this.options.evictLimits
+    if (limits === undefined) return
+    if (limits.maxSearches === undefined && limits.maxPages === undefined) return
+    // Fire-and-forget: eviction is best-effort; a failure must not break the
+    // write that triggered it.
+    void this.evict(limits).catch(() => undefined)
   }
 
   /** Close the database. Subsequent operations throw. */

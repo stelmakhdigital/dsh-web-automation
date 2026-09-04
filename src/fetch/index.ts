@@ -53,6 +53,18 @@ export interface Config {
   storePath?: string
   /** Issue conditional revalidation requests for fresh-but-expired entries. */
   revalidate?: boolean
+  /**
+   * Maximum number of page records kept in the store (LRU by last access).
+   * Oldest (least-recently-accessed) pages beyond this cap are evicted after
+   * each write. Defaults to 500. Set to 0 to disable the page cache entirely.
+   */
+  cacheMaxPages?: number
+  /**
+   * Allow requests to private/reserved network targets (loopback, LAN,
+   * link-local). Defaults to false: the SSRF guard blocks these. Enable only
+   * in a trusted, network-isolated environment.
+   */
+  allowPrivateNetworks?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -64,6 +76,8 @@ export const Config: z<Config> = z.object({
   userAgent: z.string().default(DEFAULT_USER_AGENT),
   cacheTtlMs: z.number().default(21_600_000),
   revalidate: z.boolean().default(true),
+  cacheMaxPages: z.number().default(500),
+  allowPrivateNetworks: z.boolean().default(false),
 })
 
 /** Complete config after schemastery applies every field default (except `storePath`). */
@@ -103,6 +117,7 @@ export function apply(ctx: Context, config: Config): void {
   assertTimeoutMs(resolved.timeoutMs)
   assertNonNegativeInteger('maxRedirects', resolved.maxRedirects)
   assertPositiveFinite('cacheTtlMs', resolved.cacheTtlMs)
+  assertNonNegativeInteger('cacheMaxPages', resolved.cacheMaxPages)
   const limits: CachedFetchLimits = {
     maxUrlLength: resolved.maxUrlLength,
     maxResponseBytes: resolved.maxResponseBytes,
@@ -111,8 +126,12 @@ export function apply(ctx: Context, config: Config): void {
     maxRedirects: resolved.maxRedirects,
     userAgent: resolved.userAgent,
     cacheTtlMs: resolved.cacheTtlMs,
-    store: new WebStore({ path: config.storePath ?? dshHomePath('web.db') }),
+    store: new WebStore({
+      path: config.storePath ?? dshHomePath('web.db'),
+      evictLimits: { maxPages: resolved.cacheMaxPages },
+    }),
     revalidate: resolved.revalidate,
+    allowPrivateNetworks: resolved.allowPrivateNetworks,
   }
   ctx.web.registerFetchProvider(new CachedHttpFetchProvider(limits))
 }

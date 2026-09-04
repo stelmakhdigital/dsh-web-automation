@@ -1,0 +1,52 @@
+# GitLab CI for dsh-web-automation.
+#
+# Stages:
+#   1. build — esbuild (core + browser), verify lib/ is in sync.
+#   2. test  — vitest (SSRF guard + store).
+#
+# The typecheck (tsc) is NOT a CI gate: the `@deepseek-ai/*` peer dependencies
+# are resolved from the host DSH deployment at runtime and are not installed
+# in the plugin's own `node_modules`. The `types/deepseek-ai.d.ts` stubs let
+# the editor / local `tsc` work, but they are not a full API mirror. The build
+# (esbuild) is the authoritative gate: it bundles the real code and fails on
+# syntax/import errors.
+
+image: node:22
+
+stages:
+  - build
+  - test
+
+variables:
+  # Peer deps are absent outside a DSH deployment; skip peer resolution.
+  NPM_FLAGS: "--legacy-peer-deps --no-audit --no-fund"
+
+build:
+  stage: build
+  script:
+    - npm install $NPM_FLAGS
+    - npm run build
+    - npm run build --prefix browser
+    # lib/ must be in sync with src/ (the pre-built bundle is committed).
+    - git diff --exit-code -- lib browser/lib ||
+      (echo "ERROR: lib/ is out of sync with src/. Run 'npm run build' and commit." && exit 1)
+  rules:
+    - changes:
+        - "src/**/*"
+        - "browser/src/**/*"
+        - "package.json"
+        - "browser/package.json"
+        - "esbuild.config.mjs"
+        - "browser/esbuild.config.mjs"
+
+test:
+  stage: test
+  script:
+    - npm install $NPM_FLAGS
+    - npx vitest run
+  rules:
+    - changes:
+        - "src/**/*"
+        - "test/**/*"
+        - "package.json"
+        - "vitest.config.ts"

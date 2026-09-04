@@ -38,9 +38,12 @@ export function cosineSimilarity(a: Embedding, b: Embedding): number {
   let normA = 0
   let normB = 0
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
+    const x = a[i]
+    const y = b[i]
+    if (x === undefined || y === undefined) return 0
+    dot += x * y
+    normA += x * x
+    normB += y * y
   }
   const denom = Math.sqrt(normA) * Math.sqrt(normB)
   if (denom === 0) return 0
@@ -70,7 +73,12 @@ export async function embeddingRerank(
   if (embeddings.length !== texts.length) return snippets.map((_, i) => i) // fallback
 
   const queryEmbedding = embeddings[0]
-  const scores = snippets.map((_, i) => cosineSimilarity(queryEmbedding, embeddings[i + 1]))
+  if (queryEmbedding === undefined) return snippets.map((_, i) => i) // fallback
+  const scores = snippets.map((_, i) => {
+    const snippetEmbedding = embeddings[i + 1]
+    if (snippetEmbedding === undefined) return 0
+    return cosineSimilarity(queryEmbedding, snippetEmbedding)
+  })
   // Sort indices by score (descending).
   return scores
     .map((score, i) => ({ score, i }))

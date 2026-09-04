@@ -1,5 +1,7 @@
 # dsh-web-automation
 
+> 🇬🇧 **English** | 🇷🇺 [Русский](README.ru.md)
+
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin that gives a **local model** a **local-first web stack** — no paid search API, no third-party data broker, no cloud required for the keyless engines.
 
 It bundles four capabilities into one installable plugin:

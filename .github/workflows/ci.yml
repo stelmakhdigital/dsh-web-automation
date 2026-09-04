@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# The plugin ships a pre-built lib/ (so npm git-install needs no esbuild).
+# This CI guards that contract:
+#   - build:    re-bundle both packages from src/ (catches syntax/import errors).
+#   - lib-sync: fail if the committed lib/ is stale (diff vs a fresh build).
+#   - typecheck: best-effort tsc against the published @deepseek-ai/* types.
+#     Non-blocking (continue-on-error) because the published peer versions can
+#     lag the source this plugin was cut from.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build + lib-sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build core (dsh-web-automation)
+        run: npm run build
+
+      - name: Build browser (dsh-web-browser)
+        run: npm run build --prefix browser
+
+      - name: Verify committed lib/ is in sync with src/
+        run: |
+          if ! git diff --exit-code -- lib browser/lib; then
+            echo "::error::Committed lib/ is stale. Run 'npm run build' (and 'npm run build --prefix browser') and commit the rebuilt lib/."
+            git diff --stat -- lib browser/lib
+            exit 1
+          fi
+          echo "lib/ is in sync with src/."
+
+  typecheck:
+    name: Typecheck (best-effort)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies + peer types
+        run: |
+          npm install --no-audit --no-fund
+          # Peer deps are provided by the host DSH at runtime; for typecheck we
+          # install the published versions so tsc can resolve their types.
+          npm install --no-save --no-audit --no-fund \
+            @deepseek-ai/cordis \
+            @deepseek-ai/schemastery \
+            @deepseek-ai/dsh-web \
+            @deepseek-ai/dsh-tools \
+            @deepseek-ai/dsh-timeout \
+            @deepseek-ai/dsh-credentials \
+            @deepseek-ai/dsh-home-paths \
+            @deepseek-ai/dsh-launch-environment \
+            @deepseek-ai/dsh-settings \
+            @deepseek-ai/dsh-invariants \
+            @deepseek-ai/dsh-web-search-exa \
+            @deepseek-ai/dsh-web-search-deepseek \
+            @deepseek-ai/dsh-llm \
+            @deepseek-ai/dsh-session
+
+      - name: Typecheck core
+        run: npx tsc -p tsconfig.json
+
+      - name: Typecheck browser
+        run: npx tsc -p browser/tsconfig.json

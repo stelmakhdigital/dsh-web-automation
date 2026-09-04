@@ -54,6 +54,8 @@ export interface MultiSearchProviderOptions {
   cooldownMaxMs: number
   /** Enrichment options (page fetches). */
   enrichOptions: Omit<EnrichOptions, 'store'>
+  /** Optional structured logger (observability). When set, search operations are logged. */
+  logger?: { info: (message: string, ...meta: unknown[]) => void }
 }
 
 /** The multi-engine search provider. */
@@ -75,6 +77,7 @@ export class MultiSearchProvider implements WebSearchProvider {
     const query = request.query.trim()
     if (query.length === 0) return { sources: [], truncated: false }
     const maxResults = request.maxResults ?? this.options.defaultMaxResults
+    const startedAt = Date.now()
 
     // 1. Search cache: a fresh cached result short-circuits the whole operation.
     const cacheKey = searchCacheKey(query, this.options.engines, this.options.mode)
@@ -82,6 +85,7 @@ export class MultiSearchProvider implements WebSearchProvider {
     if (cached !== undefined && Date.now() - cached.createdAt < this.options.searchCacheTtlMs) {
       // The store is type-agnostic (`sources` is opaque JSON); the recorded
       // rows always came from this provider's own `WebSearchSource[]`.
+      this.options.logger?.info('web-search: cache hit', { query, sources: (cached.sources as readonly unknown[]).length, latencyMs: Date.now() - startedAt })
       return cloneSearchResult({
         sources: cached.sources as readonly WebSearchSource[],
         ...cached.content !== undefined ? { content: cached.content } : {},
@@ -130,6 +134,7 @@ export class MultiSearchProvider implements WebSearchProvider {
       truncated,
       ...content !== undefined ? { content } : {},
     }).catch(() => undefined)
+    this.options.logger?.info('web-search: completed', { query, engines: engineIds, sources: sources.length, latencyMs: Date.now() - startedAt })
     return cloneSearchResult(result)
   }
 

@@ -25,6 +25,7 @@ import { DUCKDUCKGO_DEFAULT_ENDPOINT, DuckDuckGoEngine } from './engines/ddg.ts'
 import { DeepSeekEngine } from './engines/deepseek.ts'
 import { ExaEngine } from './engines/exa.ts'
 import { JINA_DEFAULT_BASE_URL, JinaEngine } from './engines/jina.ts'
+import { SEARXNG_DEFAULT_ENDPOINT, SearXNGEngine } from './engines/searxng.ts'
 import type { SearchEngine } from './engines/types.ts'
 import { MultiSearchProvider } from './provider.ts'
 
@@ -60,6 +61,12 @@ export interface DeepSeekEngineConfig extends EngineConfig {
   model?: string
   /** Maximum `web_search` server-tool uses per request. */
   maxUses?: number
+}
+
+/** SearXNG engine config (self-hosted metasearch; no API key needed). */
+export interface SearXNGEngineConfig {
+  /** SearXNG instance base URL (e.g., `http://localhost:8080`). */
+  endpoint?: string
 }
 
 /** Plugin config (all fields defaulted except the engine blocks). */
@@ -114,10 +121,23 @@ export interface Config {
   deepseek?: DeepSeekEngineConfig
   /** Jina engine settings. */
   jina?: EngineConfig
+  /** SearXNG engine settings (self-hosted metasearch). */
+  searxng?: SearXNGEngineConfig
+  /**
+   * Freshness filter (news mode). `24h` | `week` | `month` | `year` | `''` (off).
+   * Passed to engines that support time filters (Bing `qft`); ignored by others.
+   */
+  freshness?: string
+  /**
+   * Embedding endpoint for semantic re-ranking (local LLM server with `/embeddings`).
+   * When set, enrichment uses cosine similarity instead of BM25. Falls back to
+   * BM25 when the endpoint is unreachable.
+   */
+  embedding?: { endpoint?: string; model?: string }
 }
 
 export const Config: z<Config> = z.object({
-  engines: z.array(z.string()).default(['ddg', 'bing', 'exa', 'deepseek', 'jina']),
+  engines: z.array(z.string()).default(['ddg', 'bing', 'exa', 'deepseek', 'jina', 'searxng']),
   mode: z.union(['fallback', 'fuse']).default('fallback'),
   region: z.string().default(''),
   enrich: z.boolean().default(true),
@@ -135,10 +155,12 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.number().default(30_000),
   cooldownBaseMs: z.number().default(30_000),
   cooldownMaxMs: z.number().default(3_600_000),
+  freshness: z.string().default(''),
+  embedding: z.object({ endpoint: z.string().default(''), model: z.string().default('') }).default({}),
 })
 
 /** Complete config after schemastery applies every field default. */
-type ResolvedConfig = Required<Omit<Config, 'engine' | 'storePath' | 'exa' | 'deepseek' | 'jina'>>
+type ResolvedConfig = Required<Omit<Config, 'engine' | 'storePath' | 'exa' | 'deepseek' | 'jina' | 'searxng'>>
 
 const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647
 
@@ -248,6 +270,7 @@ export function apply(ctx: Context, config: Config): void {
       rateLimitPerSec: resolved.rateLimitPerSec,
       maxSerpBytes: 5_000_000,
       blockedDomains: resolved.blockedDomains,
+      freshness: resolved.freshness,
     }),
     new ExaEngine({
       apiKey: resolveKey(config.exa, 'EXA_API_KEY', env),
@@ -267,6 +290,13 @@ export function apply(ctx: Context, config: Config): void {
       baseURL: config.jina?.baseURL ?? JINA_DEFAULT_BASE_URL,
       userAgent: resolved.userAgent,
       maxResponseBytes: 5_000_000,
+    }),
+    new SearXNGEngine({
+      endpoint: config.searxng?.endpoint ?? SEARXNG_DEFAULT_ENDPOINT,
+      userAgent: resolved.userAgent,
+      rateLimitPerSec: resolved.rateLimitPerSec,
+      maxSerpBytes: 5_000_000,
+      blockedDomains: resolved.blockedDomains,
     }),
   ]
   const engineById = new Map(engines.map(engine => [engine.id, engine]))
@@ -294,6 +324,20 @@ export function apply(ctx: Context, config: Config): void {
       snippetChars: resolved.snippetChars,
       userAgent: resolved.userAgent,
       concurrency: resolved.enrichConcurrency,
+      ...(resolved.embedding.endpoint.length > 0
+        ? {
+            embedding: {
+              endpoint: resolved.embedding.endpoint,
+              model: resolved.embedding.model,
+              userAgent: resolved.userAgent,
+              maxResponseBytes: 5_000_000,
+              timeoutMs: 10_000,
+            },
+          }
+        : {}),
+    },
+    logger: {
+      info: (message: string, ...meta: unknown[]) => ctx.logger?.info(message, ...meta),
     },
   })
   ctx.web.registerSearchProvider(provider)

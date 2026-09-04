@@ -14,6 +14,7 @@ import type { WebSearchSource } from '@deepseek-ai/dsh-web'
 import { deadline } from '@deepseek-ai/dsh-timeout'
 import type { WebStore } from '../store/index.ts'
 import { bm25Rank } from './bm25.ts'
+import { embeddingRerank, type EmbeddingOptions } from './embedding.ts'
 import { extractReadableText, snippetWindow } from './extract.ts'
 import { readCappedText } from './http.ts'
 import { normalizeUrl } from './url.ts'
@@ -36,6 +37,8 @@ export interface EnrichOptions {
   userAgent: string
   /** Concurrent page fetches. */
   concurrency: number
+  /** Optional embedding endpoint for semantic re-ranking (falls back to BM25 when off/fails). */
+  embedding?: EmbeddingOptions
 }
 
 /**
@@ -81,12 +84,28 @@ export async function enrichSources(
   const documents = candidates.map((source, index) =>
     [source.title ?? '', source.snippet ?? '', texts[index] ?? ''].filter(part => part.length > 0).join('\n'),
   )
-  const scores = bm25Rank(query, documents)
 
-  // Re-rank: score descending, engine rank as the tie-break.
-  const ranked = candidates
-    .map((source, index) => ({ source, index, score: scores[index] ?? 0 }))
-    .sort((a, b) => b.score - a.score || a.index - b.index)
+  // Re-rank: embedding (semantic) when configured, BM25 (keyword) otherwise.
+  let ranked: { source: WebSearchSource; index: number; score: number }[]
+  const embedding = options.embedding
+  if (embedding !== undefined && embedding.endpoint.length > 0) {
+    try {
+      const order = await embeddingRerank(query, documents, embedding, signal)
+      ranked = order
+        .map((index, rank) => ({ source: candidates[index]!, index, score: 1 / (rank + 1) }))
+    } catch {
+      // Embedding failed: fall back to BM25.
+      const scores = bm25Rank(query, documents)
+      ranked = candidates
+        .map((source, index) => ({ source, index, score: scores[index] ?? 0 }))
+        .sort((a, b) => b.score - a.score || a.index - b.index)
+    }
+  } else {
+    const scores = bm25Rank(query, documents)
+    ranked = candidates
+      .map((source, index) => ({ source, index, score: scores[index] ?? 0 }))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+  }
 
   const kept = ranked.slice(0, Math.min(keep, candidates.length))
   return kept.map(({ source, index }) => {

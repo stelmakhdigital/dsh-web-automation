@@ -1,7 +1,7 @@
 {
   "name": "dsh-web-browser",
   "description": "DeepSeek Harness plugin: local Chromium (Playwright) browser automation behind the browser_* tools (open, navigate, snapshot, click, type, screenshot).",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "keywords": [
     "deepseek-harness",
     "dsh",

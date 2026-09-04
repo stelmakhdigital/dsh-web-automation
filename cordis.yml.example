@@ -13,11 +13,16 @@
   name: 'dsh-web-automation'
   config:
     search:
-      engines: [ddg, bing, exa, deepseek, jina]   # tried in this order
+      engines: [ddg, bing, exa, deepseek, jina, searxng]   # tried in this order
       mode: fallback            # fallback = first success wins; fuse = parallel + RRF merge
       region: ''                # region/market hint (DDG kl, Bing setmkt)
-      enrich: true              # enrich top results with fetched page text + BM25 re-rank
+      enrich: true              # enrich top results with fetched page text + BM25/embedding re-rank
+      # freshness: ''           # news mode: 24h | week | month | year (Bing qft); '' = off
       # cacheMaxSearches: 1000  # LRU cap on search records (evict least-recently-accessed beyond this)
+      # SearXNG (self-hosted metasearch; no API key):
+      # searxng: { endpoint: http://localhost:8080 }
+      # Embedding re-rank (local LLM server with /embeddings; falls back to BM25):
+      # embedding: { endpoint: http://localhost:11434, model: nomic-embed-text }
       # Per-engine API keys (opt-in; keyless engines need none):
       # exa:      { apiKeyEnv: EXA_API_KEY }        # or apiKey: '...'
       # deepseek: { apiKeyEnv: DEEPSEEK_API_KEY }

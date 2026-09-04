@@ -27,6 +27,12 @@ export interface BingEngineOptions {
   maxSerpBytes: number
   /** Domains (suffix match) excluded from results. */
   blockedDomains: readonly string[]
+  /**
+   * Freshness filter (news mode). Maps to Bing's `qft` parameter:
+   * `24h` → past day, `week` → past week, `month` → past month, `year` → past year.
+   * Empty string disables the filter.
+   */
+  freshness?: string
 }
 
 /** Default Bing SERP endpoint. */
@@ -63,7 +69,22 @@ export class BingEngine implements SearchEngine {
     url.searchParams.set('q', query)
     url.searchParams.set('count', String(Math.min(maxResults, 50)))
     if (this.options.market.length > 0) url.searchParams.set('setmkt', this.options.market)
+    // Freshness filter (news mode): map to Bing's qft parameter.
+    const qft = this.freshnessQft()
+    if (qft.length > 0) url.searchParams.set('qft', qft)
     return url.toString()
+  }
+
+  /** Map the freshness setting to Bing's `qft` filter value. */
+  private freshnessQft(): string {
+    const freshness = this.options.freshness ?? ''
+    switch (freshness) {
+      case '24h': return '+filter:ex1'
+      case 'week': return '+filter:ex2'
+      case 'month': return '+filter:ex3'
+      case 'year': return '+filter:ex4'
+      default: return ''
+    }
   }
 
   /** Fetch the SERP document; block-like failures surface as `WebError`. */

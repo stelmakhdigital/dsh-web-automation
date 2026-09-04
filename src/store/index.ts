@@ -190,14 +190,23 @@ export class WebStore {
   /**
    * Apply pending schema migrations. Reads the stored version; if it is older
    * than {@link WEB_STORE_SCHEMA_VERSION}, runs each migration in order and
-   * records the new version. A missing version (a brand-new or pre-versioning
-   * file) is treated as version 1 (the schema DDL has already created the
-   * current shape, so only the ALTER-based migrations run).
+   * records the new version. A missing version (a brand-new file) means the
+   * schema DDL already created the current shape, so the version is stamped to
+   * the current one and no migration runs. An existing v1 file (created before
+   * the LRU column) is upgraded via the ALTER-based migrations.
    * @param db - the open database handle.
    */
   private migrate(db: DatabaseSync): void {
     const row = db.prepare('SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string } | undefined
-    const current = row === undefined ? 1 : Number(row.value)
+    if (row === undefined) {
+      // Brand-new database: the schema DDL already created the current shape.
+      db.prepare('INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
+        'schema_version',
+        String(WEB_STORE_SCHEMA_VERSION),
+      )
+      return
+    }
+    const current = Number(row.value)
     if (current >= WEB_STORE_SCHEMA_VERSION) return
     for (const migration of WEB_STORE_MIGRATIONS) {
       if (migration.from < current) continue

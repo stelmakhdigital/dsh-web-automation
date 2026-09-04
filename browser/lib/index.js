@@ -561,21 +561,23 @@ function registerBrowserTools(ctx, options) {
   }));
   ctx.tools.register(defineTool({
     name: "browser_screenshot",
-    description: "Capture a PNG screenshot of the current page (or one element) and save it to a file. Returns the file path.",
+    description: "Capture a PNG screenshot of the current page (or one element). By default saves to a file and returns the path. With `inline: true`, returns the image as base64 (inlined into the model context).",
     parameters: {
       fullPage: { type: "boolean", description: "Capture the full scrollable page, not just the viewport." },
-      selector: { type: "string", description: "A CSS selector to capture a single element instead of the page." }
+      selector: { type: "string", description: "A CSS selector to capture a single element instead of the page." },
+      inline: { type: "boolean", description: "Return the image as base64 (inlined into the model context) instead of saving to a file." }
     },
     output: {
       schema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          path: { type: "string", required: true },
-          mimeType: { type: "string", required: true }
+          path: { type: "string", description: "File path (when inline is false)." },
+          mimeType: { type: "string", required: true },
+          base64: { type: "string", description: "Base64-encoded PNG (when inline is true)." }
         }
       },
-      render: (_args, value) => textBlock(`Screenshot saved to ${value.path}`)
+      render: (_args, value) => textBlock(value.base64 !== void 0 ? "Screenshot captured (inlined)." : `Screenshot saved to ${value.path}`)
     },
     async execute(args, exec) {
       const session = getSession(exec);
@@ -583,6 +585,9 @@ function registerBrowserTools(ctx, options) {
         ...typeof args.fullPage === "boolean" ? { fullPage: args.fullPage } : {},
         ...args.selector !== void 0 && args.selector !== "" ? { selector: args.selector } : {}
       }, exec.signal);
+      if (args.inline === true) {
+        return { mimeType: shot.mimeType, base64: shot.buffer.toString("base64") };
+      }
       const path = join(screenshotDir, `browser-${randomUUID()}.png`);
       await writeFile(path, shot.buffer);
       return { path, mimeType: shot.mimeType };

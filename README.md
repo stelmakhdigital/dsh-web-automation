@@ -103,7 +103,52 @@ Once installed and configured, the model can:
 
 - HTML SERP parsing is brittle; markup changes degrade to zero results until the parser updates (block detection converts silent empties into cooldowns).
 - The plugin runs in the host DSH process with the host's privileges (a trusted static package); it is not sandboxed. Run DSH as a normal user, and in a network-isolated container/VM if the plugin may reach sensitive targets.
-- Browser automation: one tab per agent session; screenshots are written to a file (not inlined).
+- Browser automation: one tab per agent session. Screenshots are saved to a file by default; pass `inline: true` to `browser_screenshot` to get base64 in the model context.
+
+## Examples
+
+### Keyless-only (no API keys, no SearXNG)
+
+```yaml
+dsh-web-automation:
+  search:
+    engines: [ddg, bing]   # keyless only
+    enrich: true
+```
+
+### Full (all engines + SearXNG)
+
+```yaml
+dsh-web-automation:
+  search:
+    engines: [ddg, bing, exa, deepseek, jina, searxng]
+    searxng:
+      endpoint: http://localhost:8080   # your SearXNG instance
+    embedding:
+      endpoint: http://localhost:11434  # Ollama (or any /embeddings server)
+      model: nomic-embed-text
+```
+
+### News mode (time-filtered)
+
+```yaml
+dsh-web-automation:
+  search:
+    engines: [bing]   # Bing supports the freshness filter
+    freshness: 24h    # 24h | week | month | year
+```
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ERESOLVE` peer conflict on install | Peer deps absent outside DSH deployment | `npm install --legacy-peer-deps` |
+| `Cannot find module '@deepseek-ai/...'` | Plugin installed without DSH's packages | Install DSH first (peers resolve to host's versions) |
+| `web_fetch` blocked (SSRF) | Target is loopback/private/link-local | Set `fetch.allowPrivateNetworks: true` (trusted env only) |
+| SearXNG returns non-JSON | JSON API not enabled on the instance | Add `search.formats: [html, json]` to SearXNG's `settings.yml` |
+| Embedding re-rank falls back to BM25 | Embedding endpoint unreachable | Check the endpoint URL + model name; BM25 is the fallback |
+| Browser: `Chromium not found` | Playwright browser not installed | `npx playwright install chromium` |
+| `web.db` grows large | Cache eviction caps too high | Lower `fetch.cacheMaxPages` / `search.cacheMaxSearches` |
 
 ## License
 

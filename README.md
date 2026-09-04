@@ -19,20 +19,20 @@ All state is local: the store is `$DSH_HOME/web.db`. Outbound traffic for the ke
 
 The plugin must be installed **alongside your DSH deployment** (in the same `node_modules` tree), because it resolves the host's `@deepseek-ai/*` packages at runtime (peer dependencies).
 
-From this GitHub repo:
+The DSH deployment is a **pnpm workspace**, so use `pnpm` (not `npm` — npm does not support the `workspace:` protocol used by DSH's internal packages):
 
 ```sh
-npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git
+pnpm install git+https://github.com/stelmakhdigital/dsh-web-automation.git
 ```
 
-> The `@deepseek-ai/*` peer dependencies are provided by your DSH installation. If you install the plugin into a project that does not already have DSH's packages, install DSH first so the peers resolve to the host's versions.
+> The `@deepseek-ai/*` peer dependencies are provided by your DSH installation (resolved from the workspace). If you install the plugin into a project that does not already have DSH's packages, install DSH first so the peers resolve to the host's versions.
 
 ### Optional: browser automation
 
 The [`dsh-web-browser`](browser/) sub-package adds local Chromium (Playwright) automation behind the `browser_*` tools (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). It is separate because it pulls in Playwright + a Chromium download.
 
 ```sh
-npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
+pnpm install git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
 # then, one-time, install the Chromium binary:
 npx playwright install chromium
 ```

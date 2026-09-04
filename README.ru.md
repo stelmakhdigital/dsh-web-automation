@@ -19,20 +19,20 @@
 
 Плагин должен быть установлен **вместе с вашим DSH-деплоем** (в том же дереве `node_modules`), потому что он резолвит `@deepseek-ai/*` пакеты хоста в рантайме (peer dependencies).
 
-Из этого GitHub-репозитория:
+DSH-деплой — это **pnpm workspace**, поэтому используйте `pnpm` (не `npm` — npm не поддерживает протокол `workspace:`, который используют внутренние пакеты DSH):
 
 ```sh
-npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git --legacy-peer-deps
+pnpm install git+https://github.com/stelmakhdigital/dsh-web-automation.git
 ```
 
-> Peer-зависимости `@deepseek-ai/*` предоставляются вашей установкой DSH. Если вы устанавливаете плагин в проект, где ещё нет пакетов DSH, сначала установите DSH, чтобы peers резолвились к версиям хоста.
+> Peer-зависимости `@deepseek-ai/*` предоставляются вашей установкой DSH (резолвятся из workspace). Если вы устанавливаете плагин в проект, где ещё нет пакетов DSH, сначала установите DSH, чтобы peers резолвились к версиям хоста.
 
 ### Опционально: browser automation
 
 Подпакет [`dsh-web-browser`](browser/) добавляет локальный Chromium (Playwright) автоматизацию за tool `browser_*` (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). Он вынесен отдельно, потому что тянет Playwright + загрузку Chromium.
 
 ```sh
-npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser --legacy-peer-deps
+pnpm install git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
 # затем, один раз, установите бинарник Chromium:
 npx playwright install chromium
 ```

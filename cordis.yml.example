@@ -1,14 +1,15 @@
 # Example: enable the local web stack in a DeepSeek Harness deployment.
 #
-# 1. Install the package next to your DSH deployment (same node_modules tree),
-#    e.g. from this GitHub repo:
+# 1. Install the package into your DSH profile (it is a DSH bundle — the
+#    shipped local-web.cordis.yml overlay is applied automatically, so the
+#    rows below are what that overlay adds):
 #
-#       pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git
+#       dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
 #
-# 2. Add the rows below to your deployment's cordis.yml (or an overlay applied
-#    with `dsh --patch ...`). Every field is defaulted, so an empty config
-#    enables the full local web stack with the keyless engines (DuckDuckGo +
-#    Bing).
+#    Manual alternative: add the rows below to your profile's cordis.yml
+#    (or an overlay applied with `dsh --profile <name> --patch ...`). Every
+#    field is defaulted, so an empty config enables the full local web stack
+#    with the keyless engines (DuckDuckGo + Bing).
 #
 #    NOTE: this plugin is MUTUALLY EXCLUSIVE with the DSH built-in web
 #    packages (web-search-multi / web-fetch-cached / web-platforms /
@@ -17,12 +18,14 @@
 #    The `web` seam row below is REQUIRED: without it the seam sees two usable
 #    search providers and fails with WEB_PROVIDER_AMBIGUOUS.
 #
-# 3. (Optional) Browser automation — a separate sub-package:
+# 2. (Optional) Browser automation — a separate sub-package, installed from a
+#    local clone (pnpm cannot install a sub-directory of a git repo):
 #
-#       pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
-#       npx playwright install chromium
+#       git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
+#       dsh plugin --profile tui add <clone>/browser
+#       dsh plugin --profile tui exec playwright install chromium
 #
-#    then add the `web-browser` row at the bottom of this file.
+#    Its bundle patch adds the `web-browser` row at the bottom of this file.
 #
 - id: web
   config:

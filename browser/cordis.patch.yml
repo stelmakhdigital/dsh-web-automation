@@ -1,0 +1,28 @@
+# Browser-automation overlay for the dsh-web-browser sub-package.
+#
+# Applied automatically when the package is installed as a DSH bundle:
+#
+#   git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
+#   dsh plugin --profile <name> add <clone>/browser
+#   dsh plugin --profile <name> exec playwright install chromium
+#
+# (pnpm cannot install a sub-directory of a git repo — hence the local clone.
+# Keep the clone in a stable place; the profile links to it.)
+#
+# Registers the `dsh-web-browser` plugin: the browser_* tools (open, navigate,
+# snapshot, click, type, screenshot) driving a local Playwright Chromium.
+# Sensitive actions (navigate/evaluate, plus click/type in `all` mode) are
+# gated by the `approval` setting — default `never`; use `navigate` or `all`
+# to route them through the approval service.
+#
+# The `web` seam pin and the host `tool-web` row come from the core
+# dsh-web-automation bundle (install it first) — this overlay only adds the
+# browser plugin row.
+
+- insert:
+  - id: web-browser
+    name: 'dsh-web-browser'
+    config:
+      tool: true
+      headless: true
+      approval: never

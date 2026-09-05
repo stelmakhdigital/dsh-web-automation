@@ -17,36 +17,36 @@ All state is local: the store is `$DSH_HOME/web.db`. Outbound traffic for the ke
 
 ## Install
 
-The plugin must be installed **alongside your DSH deployment** (in the same `node_modules` tree), because it resolves the host's `@deepseek-ai/*` packages at runtime (peer dependencies).
+Plugins are installed **into a DSH profile** with `dsh plugin` — each profile is its own pnpm workspace under `$DSH_HOME/profiles/<name>`. At boot, DSH symlinks the host's `@deepseek-ai/*` packages into the profile's `node_modules`, so the plugin's peer dependencies resolve to the host's own copies.
 
-The DSH deployment is a **pnpm workspace**, so use `pnpm` (not `npm` — npm does not support the `workspace:` protocol used by DSH's internal packages). The `-w` flag adds the plugin to the workspace root:
-
-```sh
-pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git
-```
-
-> The `@deepseek-ai/*` peer dependencies are provided by your DSH installation (resolved from the workspace). If you install the plugin into a project that does not already have DSH's packages, install DSH first so the peers resolve to the host's versions.
-
-### Quick start: the `local-web.cordis.yml` overlay
-
-The repo ships [`local-web.cordis.yml`](local-web.cordis.yml) — a ready-made overlay that pins the `web` seam to the plugin's providers, enables `web_fetch` in the host `tool-web` row, and registers the plugin. Apply it on top of a standard DSH deployment:
+This package is a **DSH bundle**: its `package.json` declares `dsh.bundle`, so installing it automatically applies the shipped [`local-web.cordis.yml`](local-web.cordis.yml) overlay — it pins the `web` seam to the plugin's providers, enables `web_fetch` in the host `tool-web` row, and registers the plugin. No manual `--patch` needed:
 
 ```sh
-dsh --patch "$PWD/local-web.cordis.yml"        # TUI
-dsh web --patch "$PWD/local-web.cordis.yml"    # web GUI
+dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
 ```
 
-The seam pin is **required**: without it the seam sees two usable search providers (the deployment default plus `multi`) and fails with `WEB_PROVIDER_AMBIGUOUS`.
+(Replace `tui` with your profile name. The seam pin is **required**: without it the seam sees two usable search providers (the deployment default plus `multi`) and fails with `WEB_PROVIDER_AMBIGUOUS`.)
+
+Manual alternative — if you want to tweak the config before applying, apply the overlay yourself:
+
+```sh
+dsh --profile tui --patch "$PWD/local-web.cordis.yml"
+```
 
 ### Optional: browser automation
 
 The [`dsh-web-browser`](browser/) sub-package adds local Chromium (Playwright) automation behind the `browser_*` tools (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). It is separate because it pulls in Playwright + a Chromium download.
 
+It is a sub-directory of this repo, and pnpm cannot install a sub-directory of a git repo — so install it from a local clone (keep the clone in a stable place; the profile links to it):
+
 ```sh
-pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
-# then, one-time, install the Chromium binary:
-npx playwright install chromium
+git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
+dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
+# one-time: install the Chromium binary
+dsh plugin --profile tui exec playwright install chromium
 ```
+
+The browser package is a bundle too — its patch (`browser/cordis.patch.yml`) registers the browser plugin row automatically.
 
 ## Configure
 

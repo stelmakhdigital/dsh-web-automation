@@ -17,36 +17,36 @@
 
 ## Установка
 
-Плагин должен быть установлен **вместе с вашим DSH-деплоем** (в том же дереве `node_modules`), потому что он резолвит `@deepseek-ai/*` пакеты хоста в рантайме (peer dependencies).
+Плагины ставятся **в профиль DSH** командой `dsh plugin` — каждый профиль это отдельный pnpm-workspace в `$DSH_HOME/profiles/<name>`. При старте DSH кладёт симлинки на `@deepseek-ai/*` пакеты хоста в `node_modules` профиля, поэтому peer-зависимости плагина резолвятся к собственным копиям хоста.
 
-DSH-деплой — это **pnpm workspace**, поэтому используйте `pnpm` (не `npm` — npm не поддерживает протокол `workspace:`, который используют внутренние пакеты DSH). Флаг `-w` добавляет плагин в корень workspace:
-
-```sh
-pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git
-```
-
-> Peer-зависимости `@deepseek-ai/*` предоставляются вашей установкой DSH (резолвятся из workspace). Если вы устанавливаете плагин в проект, где ещё нет пакетов DSH, сначала установите DSH, чтобы peers резолвились к версиям хоста.
-
-### Быстрый старт: оверлей `local-web.cordis.yml`
-
-В репозитории есть готовый оверлей [`local-web.cordis.yml`](local-web.cordis.yml): он фиксирует `web`-seam на провайдерах плагина, включает `web_fetch` в строке `tool-web` хоста и регистрирует плагин. Примените его поверх стандартного DSH-деплоя:
+Этот пакет — **DSH bundle**: в `package.json` объявлено `dsh.bundle`, поэтому при установке автоматически применяется поставляемый оверлей [`local-web.cordis.yml`](local-web.cordis.yml) — он фиксирует `web`-seam на провайдерах плагина, включает `web_fetch` в строке `tool-web` хоста и регистрирует плагин. Ручной `--patch` не нужен:
 
 ```sh
-dsh --patch "$PWD/local-web.cordis.yml"        # TUI
-dsh web --patch "$PWD/local-web.cordis.yml"    # web GUI
+dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
 ```
 
-Фиксация seam **обязательна**: без неё seam видит два пригодных search-провайдера (дефолт деплоя + `multi`) и падает с `WEB_PROVIDER_AMBIGUOUS`.
+(Замените `tui` на имя вашего профиля. Фиксация seam **обязательна**: без неё seam видит два пригодных search-провайдера (дефолт деплоя + `multi`) и падает с `WEB_PROVIDER_AMBIGUOUS`.)
+
+Ручной вариант — если хочется сначала поправить конфиг, примените оверлей сами:
+
+```sh
+dsh --profile tui --patch "$PWD/local-web.cordis.yml"
+```
 
 ### Опционально: browser automation
 
 Подпакет [`dsh-web-browser`](browser/) добавляет локальный Chromium (Playwright) автоматизацию за tool `browser_*` (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). Он вынесен отдельно, потому что тянет Playwright + загрузку Chromium.
 
+Это подкаталог репозитория, а pnpm не умеет ставить подкаталог git-репозитория — поэтому ставится из локального клона (храните клон в стабильном месте, профиль ссылается на него):
+
 ```sh
-pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
-# затем, один раз, установите бинарник Chromium:
-npx playwright install chromium
+git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
+dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
+# один раз: установить бинарник Chromium
+dsh plugin --profile tui exec playwright install chromium
 ```
+
+Браузерный пакет тоже bundle — его патч (`browser/cordis.patch.yml`) автоматически добавляет строку browser-плагина.
 
 ## Конфигурация
 

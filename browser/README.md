@@ -15,11 +15,16 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin tha
 
 ## Install
 
+This package is a sub-directory of the `dsh-web-automation` repo, and pnpm cannot install a sub-directory of a git repo — so install it into your DSH profile from a local clone (keep the clone in a stable place; the profile links to it):
+
 ```sh
-npm install git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser
+git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
+dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
 # one-time: install the Chromium binary
-npx playwright install chromium
+dsh plugin --profile tui exec playwright install chromium
 ```
+
+The package is a DSH bundle — its `cordis.patch.yml` registers the `web-browser` plugin row automatically (install the core `dsh-web-automation` bundle first for the `web` seam pin + `tool-web` row).
 
 ## Configure
 

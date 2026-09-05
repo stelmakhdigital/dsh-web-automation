@@ -18,6 +18,7 @@
   "exports": {
     ".": "./lib/index.js",
     "./invariant": "./lib/invariant.js",
+    "./local-web.cordis.yml": "./local-web.cordis.yml",
     "./package.json": "./package.json"
   },
   "files": [
@@ -28,6 +29,11 @@
     "README.md",
     "LICENSE"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./local-web.cordis.yml"
+    }
+  },
   "scripts": {
     "build": "node esbuild.config.mjs",
     "test": "vitest run",

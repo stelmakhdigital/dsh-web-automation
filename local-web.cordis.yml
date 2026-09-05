@@ -1,8 +1,16 @@
 # Local-web overlay for the dsh-web-automation plugin: keyless multi-engine
 # web search + cached fetch + platform search + history tools for the standard
-# DSH deployment. Apply with:
+# DSH deployment.
 #
-#   dsh --patch "$PWD/local-web.cordis.yml"
+# This file is the package's DSH BUNDLE patch (see "dsh.bundle" in
+# package.json), so installing the package applies it automatically — no
+# manual --patch needed:
+#
+#   dsh plugin --profile <name> add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+#
+# Manual alternative (e.g. to tweak the config before applying):
+#
+#   dsh --profile <name> --patch "$PWD/local-web.cordis.yml"
 #   # or, for the web GUI:
 #   dsh web --patch "$PWD/local-web.cordis.yml"
 #
@@ -56,9 +64,15 @@
           cacheClear: true
           stats: true
 
-# Browser automation is a separate sub-package (dsh-web-browser). After
-# `pnpm install -w git+https://github.com/stelmakhdigital/dsh-web-automation.git#browser`
-# and `npx playwright install chromium`, add its row here:
+# Browser automation is a separate sub-package (dsh-web-browser), installed
+# as its own bundle (pnpm cannot install a sub-directory of a git repo, hence
+# the local clone; keep it in a stable place):
+#
+#   git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
+#   dsh plugin --profile <name> add <clone>/browser
+#   dsh plugin --profile <name> exec playwright install chromium
+#
+# Its bundle patch (browser/cordis.patch.yml) adds the row automatically:
 #
 #    - id: web-browser
 #      name: 'dsh-web-browser'

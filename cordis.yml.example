@@ -23,6 +23,7 @@
 #
 #       git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
 #       dsh plugin --profile tui add <clone>/browser
+#       dsh plugin --profile tui add playwright
 #       dsh plugin --profile tui exec playwright install chromium
 #
 #    Its bundle patch adds the `web-browser` row at the bottom of this file.

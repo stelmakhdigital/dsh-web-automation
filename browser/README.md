@@ -20,7 +20,9 @@ This package is a sub-directory of the `dsh-web-automation` repo, and pnpm canno
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
-# one-time: install the Chromium binary
+# one-time: playwright + the Chromium binary (pnpm's link: install does not
+# pull the linked package's own dependencies, so add playwright explicitly)
+dsh plugin --profile tui add playwright
 dsh plugin --profile tui exec playwright install chromium
 ```
 

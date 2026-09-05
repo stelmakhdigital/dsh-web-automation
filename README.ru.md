@@ -42,7 +42,11 @@ dsh --profile tui --patch "$PWD/local-web.cordis.yml"
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
-# один раз: установить бинарник Chromium
+# один раз: playwright + бинарник Chromium.
+# pnpm ставит локальный каталог протоколом link:, который НЕ тянет
+# зависимости самого линкованного пакета — поэтому playwright
+# добавляется в профиль явно:
+dsh plugin --profile tui add playwright
 dsh plugin --profile tui exec playwright install chromium
 ```
 

@@ -42,7 +42,11 @@ It is a sub-directory of this repo, and pnpm cannot install a sub-directory of a
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
-# one-time: install the Chromium binary
+# one-time: playwright + the Chromium binary.
+# pnpm installs a local directory with the link: protocol, which does NOT
+# pull the linked package's own dependencies — so playwright is added to the
+# profile explicitly:
+dsh plugin --profile tui add playwright
 dsh plugin --profile tui exec playwright install chromium
 ```
 

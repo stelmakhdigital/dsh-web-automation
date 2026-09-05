@@ -70,6 +70,7 @@
 #
 #   git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
 #   dsh plugin --profile <name> add <clone>/browser
+#   dsh plugin --profile <name> add playwright
 #   dsh plugin --profile <name> exec playwright install chromium
 #
 # Its bundle patch (browser/cordis.patch.yml) adds the row automatically:

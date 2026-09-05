@@ -122,9 +122,6 @@ var BrowserRuntime = class extends Service {
 var ANON_KEY = /* @__PURE__ */ Symbol("browser-anon-session");
 var runtime_default = BrowserRuntime;
 
-// src/playwright.ts
-import { chromium } from "playwright";
-
 // src/ssrf.ts
 import { lookup } from "node:dns/promises";
 var IPV4_BLOCKED = [
@@ -232,6 +229,22 @@ async function assertPublicNavigation(url, allowPrivate) {
 var DEFAULT_TIMEOUT_MS = 3e4;
 var DEFAULT_MAX_TEXT_LENGTH = 2e4;
 var DEFAULT_MAX_ELEMENTS = 200;
+var playwrightModule;
+var playwrightLoad;
+var playwrightLoadFailed = false;
+function loadPlaywright() {
+  playwrightLoad ??= import("playwright").then(
+    (mod) => {
+      playwrightModule = mod;
+      return mod;
+    },
+    (error) => {
+      playwrightLoadFailed = true;
+      throw error;
+    }
+  );
+  return playwrightLoad;
+}
 var INTERACTIVE_SELECTOR = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="radio"], [role="combobox"], [role="switch"]';
 var PlaywrightProvider = class {
   id = "playwright";
@@ -248,19 +261,33 @@ var PlaywrightProvider = class {
     this.maxTextLength = config.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH;
     this.maxElements = config.maxElements ?? DEFAULT_MAX_ELEMENTS;
     this.allowPrivateNetworks = config.allowPrivateNetworks ?? false;
+    void loadPlaywright().catch(() => void 0);
   }
   /** Cheap local usability check: the Chromium executable must resolve. */
   available() {
-    try {
-      return chromium.executablePath() !== "";
-    } catch {
-      return false;
+    if (playwrightModule !== void 0) {
+      try {
+        return playwrightModule.chromium.executablePath() !== "";
+      } catch {
+        return false;
+      }
     }
+    return !playwrightLoadFailed;
   }
   async open(options, signal) {
     throwIfAborted(signal);
+    let pw;
+    try {
+      pw = await loadPlaywright();
+    } catch (error) {
+      throw new BrowserError(
+        "playwright is not installed where the dsh-web-browser package is linked; install it into the profile (dsh plugin --profile <name> add playwright) or into the browser package directory (npm install)",
+        BROWSER_CODES.UNAVAILABLE,
+        { cause: error }
+      );
+    }
     const storageState = this.resolveStorageState(options.authProfile);
-    const browser = await chromium.launch({ headless: options.headless ?? this.headless });
+    const browser = await pw.chromium.launch({ headless: options.headless ?? this.headless });
     const contextOptions = {};
     if (storageState !== void 0) contextOptions.storageState = storageState;
     const context = await browser.newContext(contextOptions);

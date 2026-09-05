@@ -10,11 +10,31 @@
  * present OR a resolver is set (the resolver may yield a key at search time).
  * A search issued without any key fails with a provider error, which the
  * router's cooldown handles — the engine is not silently skipped.
+ *
+ * The `@deepseek-ai/dsh-web-search-exa` package is OPTIONAL: it is not part
+ * of the host DSH dependency graph, so it is loaded lazily on the first exa
+ * search. A deployment without the package still loads the plugin; an exa
+ * search then fails with a clear `WEB_ENGINE_UNAVAILABLE` error, which the
+ * router's cooldown handles like any engine failure.
  * @module @deepseek-ai/dsh-web-search-multi/engines/exa
  */
 
-import { ExaSearchProvider, EXA_DEFAULT_BASE_URL } from '@deepseek-ai/dsh-web-search-exa'
+import { WebError } from '@deepseek-ai/dsh-web'
 import type { EngineSearchResult, SearchEngine } from './types.ts'
+
+/** The optional exa package, loaded lazily (see the module docs). */
+type ExaModule = typeof import('@deepseek-ai/dsh-web-search-exa')
+
+/** The `ExaSearchProvider` instance type from the lazily loaded module. */
+type ExaProvider = InstanceType<ExaModule['ExaSearchProvider']>
+
+let exaModuleLoad: Promise<ExaModule> | undefined
+
+/** Load the exa package on first use (the promise is cached, success or failure). */
+function loadExaModule(): Promise<ExaModule> {
+  exaModuleLoad ??= import('@deepseek-ai/dsh-web-search-exa')
+  return exaModuleLoad
+}
 
 /** Engine options. */
 export interface ExaEngineOptions {
@@ -39,21 +59,12 @@ export class ExaEngine implements SearchEngine {
   readonly id = 'exa'
   private readonly options: ExaEngineOptions
   private cachedKey: string
-  private provider: ExaSearchProvider
+  private provider: ExaProvider | undefined
+  private providerKey: string | undefined
 
   constructor(options: ExaEngineOptions) {
     this.options = options
     this.cachedKey = options.apiKey ?? ''
-    this.provider = this.buildProvider(this.cachedKey)
-  }
-
-  private buildProvider(apiKey: string): ExaSearchProvider {
-    return new ExaSearchProvider({
-      apiKey,
-      baseURL: this.options.baseURL ?? EXA_DEFAULT_BASE_URL,
-      searchType: this.options.searchType ?? 'auto',
-      highlightsPerResult: this.options.highlightsPerResult ?? 3,
-    })
   }
 
   /** Available when a key is present (static, or a resolver that may yield one). */
@@ -61,14 +72,33 @@ export class ExaEngine implements SearchEngine {
     return this.cachedKey.length > 0 || this.options.resolveApiKey !== undefined
   }
 
-  /** Delegate to the wrapped provider, resolving the key per search when a resolver is set. */
+  /**
+   * Delegate to the wrapped provider, loading the optional package on first
+   * use and resolving the key per search when a resolver is set.
+   */
   async search(query: string, maxResults: number, signal: AbortSignal): Promise<EngineSearchResult> {
+    let mod: ExaModule
+    try {
+      mod = await loadExaModule()
+    } catch (error) {
+      throw new WebError(
+        'the exa engine is enabled, but the @deepseek-ai/dsh-web-search-exa package is not installed in this deployment; remove "exa" from search.engines or install the package',
+        'WEB_ENGINE_UNAVAILABLE',
+        { cause: error },
+      )
+    }
     if (this.options.resolveApiKey !== undefined) {
       const resolved = (await this.options.resolveApiKey()) ?? ''
-      if (resolved !== this.cachedKey) {
-        this.cachedKey = resolved
-        this.provider = this.buildProvider(resolved)
-      }
+      if (resolved !== this.cachedKey) this.cachedKey = resolved
+    }
+    if (this.provider === undefined || this.providerKey !== this.cachedKey) {
+      this.provider = new mod.ExaSearchProvider({
+        apiKey: this.cachedKey,
+        baseURL: this.options.baseURL ?? mod.EXA_DEFAULT_BASE_URL,
+        searchType: this.options.searchType ?? 'auto',
+        highlightsPerResult: this.options.highlightsPerResult ?? 3,
+      })
+      this.providerKey = this.cachedKey
     }
     const result = await this.provider.search({ query, maxResults }, signal)
     return { sources: result.sources, ...result.content !== undefined ? { content: result.content } : {} }

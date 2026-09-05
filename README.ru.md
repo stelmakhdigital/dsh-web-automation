@@ -37,20 +37,18 @@ dsh --profile tui --patch "$PWD/local-web.cordis.yml"
 
 Подпакет [`dsh-web-browser`](browser/) добавляет локальный Chromium (Playwright) автоматизацию за tool `browser_*` (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). Он вынесен отдельно, потому что тянет Playwright + загрузку Chromium.
 
-Это подкаталог репозитория, а pnpm не умеет ставить подкаталог git-репозитория — поэтому ставится из локального клона (храните клон в стабильном месте, профиль ссылается на него):
+Это подкаталог репозитория, а pnpm не умеет ставить подкаталог git-репозитория напрямую. Ставится из локального клона **тарбаллом** (`npm pack`): в отличие от `link:`-установки, тарболл распаковывается в `node_modules` профиля — ставятся собственные зависимости пакета (playwright) и импорты `@deepseek-ai/*` резолвятся к пакетам хоста:
 
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
-dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
-# один раз: playwright + бинарник Chromium.
-# pnpm ставит локальный каталог протоколом link:, который НЕ тянет
-# зависимости самого линкованного пакета — поэтому playwright
-# добавляется в профиль явно:
-dsh plugin --profile tui add playwright
+cd ~/dsh-plugins/dsh-web-automation
+npm pack browser    # → dsh-web-browser-0.3.0.tgz (lib/ собран в репозитории)
+dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
+# один раз: установить бинарник Chromium
 dsh plugin --profile tui exec playwright install chromium
 ```
 
-Браузерный пакет тоже bundle — его патч (`browser/cordis.patch.yml`) автоматически добавляет строку browser-плагина.
+Браузерный пакет тоже bundle — его патч (`cordis.patch.yml` в тарболе) автоматически добавляет строку browser-плагина. Обновление: `git pull` в клоне, снова `npm pack browser`, `dsh plugin add` нового тарбола.
 
 ## Конфигурация
 

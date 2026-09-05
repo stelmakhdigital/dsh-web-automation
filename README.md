@@ -37,20 +37,18 @@ dsh --profile tui --patch "$PWD/local-web.cordis.yml"
 
 The [`dsh-web-browser`](browser/) sub-package adds local Chromium (Playwright) automation behind the `browser_*` tools (`browser_open`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot`). It is separate because it pulls in Playwright + a Chromium download.
 
-It is a sub-directory of this repo, and pnpm cannot install a sub-directory of a git repo — so install it from a local clone (keep the clone in a stable place; the profile links to it):
+It is a sub-directory of this repo, and pnpm cannot install a sub-directory of a git repo directly. Install it from a local clone as a **tarball** (`npm pack`): unlike a `link:` install, the tarball is unpacked into the profile's `node_modules`, so the package's own dependencies (playwright) are installed and its `@deepseek-ai/*` imports resolve to the host's packages:
 
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
-dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
-# one-time: playwright + the Chromium binary.
-# pnpm installs a local directory with the link: protocol, which does NOT
-# pull the linked package's own dependencies — so playwright is added to the
-# profile explicitly:
-dsh plugin --profile tui add playwright
+cd ~/dsh-plugins/dsh-web-automation
+npm pack browser    # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
+dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
+# one-time: install the Chromium binary
 dsh plugin --profile tui exec playwright install chromium
 ```
 
-The browser package is a bundle too — its patch (`browser/cordis.patch.yml`) registers the browser plugin row automatically.
+The browser package is a bundle too — its patch (`cordis.patch.yml` in the tarball) registers the browser plugin row automatically. To update: `git pull` in the clone, `npm pack browser` again, and `dsh plugin add` the new tarball.
 
 ## Configure
 

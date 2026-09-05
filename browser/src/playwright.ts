@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-web-browser/playwright
  */
 
-import { chromium, type Browser, type Page } from 'playwright'
+import type { Browser, Page } from 'playwright'
 import { checkSsrf } from './ssrf.ts'
 import type {
   BrowserElement,
@@ -64,6 +64,36 @@ const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_TEXT_LENGTH = 20_000
 const DEFAULT_MAX_ELEMENTS = 200
 
+/** The playwright package, loaded lazily (see {@link loadPlaywright}). */
+type PlaywrightModule = typeof import('playwright')
+
+let playwrightModule: PlaywrightModule | undefined
+let playwrightLoad: Promise<PlaywrightModule> | undefined
+let playwrightLoadFailed = false
+
+/**
+ * Load playwright on first use (the promise is cached, success or failure).
+ * The browser package is often installed from a local checkout (pnpm does not
+ * install a linked package's own dependencies), so a static import would fail
+ * to load the plugin whenever playwright is not resolvable from the package's
+ * real location. Lazy loading keeps the plugin tree loadable; a missing
+ * playwright then surfaces as a clear `BROWSER_UNAVAILABLE` error from
+ * {@link PlaywrightProvider.open}.
+ */
+function loadPlaywright(): Promise<PlaywrightModule> {
+  playwrightLoad ??= import('playwright').then(
+    (mod) => {
+      playwrightModule = mod
+      return mod
+    },
+    (error: unknown) => {
+      playwrightLoadFailed = true
+      throw error
+    },
+  )
+  return playwrightLoad
+}
+
 /** CSS selector matching the interactive elements surfaced in a snapshot. */
 const INTERACTIVE_SELECTOR =
   'a[href], button, input, textarea, select, [role="button"], [role="link"], '
@@ -88,21 +118,38 @@ export class PlaywrightProvider implements BrowserProvider {
     this.maxTextLength = config.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH
     this.maxElements = config.maxElements ?? DEFAULT_MAX_ELEMENTS
     this.allowPrivateNetworks = config.allowPrivateNetworks ?? false
+    // Preload so available() is accurate by the first browser action.
+    void loadPlaywright().catch(() => undefined)
   }
 
   /** Cheap local usability check: the Chromium executable must resolve. */
   available(): boolean {
-    try {
-      return chromium.executablePath() !== ''
-    } catch {
-      return false
+    if (playwrightModule !== undefined) {
+      try {
+        return playwrightModule.chromium.executablePath() !== ''
+      } catch {
+        return false
+      }
     }
+    // Still loading (optimistic — open() reports the real error) or the load
+    // already failed (unavailable).
+    return !playwrightLoadFailed
   }
 
   async open(options: BrowserOpenOptions, signal?: AbortSignal): Promise<BrowserSession> {
     throwIfAborted(signal)
+    let pw: PlaywrightModule
+    try {
+      pw = await loadPlaywright()
+    } catch (error) {
+      throw new BrowserError(
+        'playwright is not installed where the dsh-web-browser package is linked; install it into the profile (dsh plugin --profile <name> add playwright) or into the browser package directory (npm install)',
+        BROWSER_CODES.UNAVAILABLE,
+        { cause: error },
+      )
+    }
     const storageState = this.resolveStorageState(options.authProfile)
-    const browser = await chromium.launch({ headless: options.headless ?? this.headless })
+    const browser = await pw.chromium.launch({ headless: options.headless ?? this.headless })
     const contextOptions: { storageState?: string } = {}
     if (storageState !== undefined) contextOptions.storageState = storageState
     const context = await browser.newContext(contextOptions)

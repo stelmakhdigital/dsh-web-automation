@@ -15,14 +15,14 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin tha
 
 ## Install
 
-This package is a sub-directory of the `dsh-web-automation` repo, and pnpm cannot install a sub-directory of a git repo — so install it into your DSH profile from a local clone (keep the clone in a stable place; the profile links to it):
+This package is a sub-directory of the `dsh-web-automation` repo, and pnpm cannot install a sub-directory of a git repo directly. Install it into your DSH profile from a local clone as a **tarball** (`npm pack`) — unlike a `link:` install, the tarball is unpacked into the profile's `node_modules`, so playwright is installed and the package's `@deepseek-ai/*` imports resolve to the host's packages:
 
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
-dsh plugin --profile tui add ~/dsh-plugins/dsh-web-automation/browser
-# one-time: playwright + the Chromium binary (pnpm's link: install does not
-# pull the linked package's own dependencies, so add playwright explicitly)
-dsh plugin --profile tui add playwright
+cd ~/dsh-plugins/dsh-web-automation
+npm pack browser    # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
+dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
+# one-time: install the Chromium binary
 dsh plugin --profile tui exec playwright install chromium
 ```
 

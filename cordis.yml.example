@@ -22,8 +22,8 @@
 #    local clone (pnpm cannot install a sub-directory of a git repo):
 #
 #       git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
-#       dsh plugin --profile tui add <clone>/browser
-#       dsh plugin --profile tui add playwright
+#       cd <clone> && npm pack browser
+#       dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
 #       dsh plugin --profile tui exec playwright install chromium
 #
 #    Its bundle patch adds the `web-browser` row at the bottom of this file.

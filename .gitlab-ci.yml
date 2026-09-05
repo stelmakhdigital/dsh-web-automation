@@ -51,7 +51,7 @@ typecheck-host:
     - git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness.git deepseek-harness
     - cd deepseek-harness
     - corepack enable
-    - pnpm install --no-frozen-lockfile --ignore-scripts --no-audit
+    - pnpm install --no-frozen-lockfile --ignore-scripts
     - cd ..
     - DSH_HOST=$CI_PROJECT_DIR/deepseek-harness npm run typecheck:host
   rules:

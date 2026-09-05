@@ -74,7 +74,7 @@ jobs:
         run: |
           cd deepseek-harness
           corepack enable
-          pnpm install --no-frozen-lockfile --ignore-scripts --no-audit
+          pnpm install --no-frozen-lockfile --ignore-scripts
 
       - name: Typecheck against host sources
         env:

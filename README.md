@@ -42,13 +42,13 @@ It is a sub-directory of this repo, and pnpm cannot install a sub-directory of a
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 cd ~/dsh-plugins/dsh-web-automation
-npm pack browser    # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
+npm pack ./browser  # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
 dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
 # one-time: install the Chromium binary
 dsh plugin --profile tui exec playwright install chromium
 ```
 
-The browser package is a bundle too — its patch (`cordis.patch.yml` in the tarball) registers the browser plugin row automatically. To update: `git pull` in the clone, `npm pack browser` again, and `dsh plugin add` the new tarball.
+The browser package is a bundle too — its patch (`cordis.patch.yml` in the tarball) registers the browser plugin row automatically. To update: `git pull` in the clone, `npm pack ./browser` again, and `dsh plugin add` the new tarball.
 
 ## Configure
 

@@ -22,7 +22,7 @@
 #    local clone (pnpm cannot install a sub-directory of a git repo):
 #
 #       git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
-#       cd <clone> && npm pack browser
+#       cd <clone> && npm pack ./browser
 #       dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
 #       dsh plugin --profile tui exec playwright install chromium
 #

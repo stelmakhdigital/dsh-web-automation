@@ -42,13 +42,13 @@ dsh --profile tui --patch "$PWD/local-web.cordis.yml"
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 cd ~/dsh-plugins/dsh-web-automation
-npm pack browser    # → dsh-web-browser-0.3.0.tgz (lib/ собран в репозитории)
+npm pack ./browser   # → dsh-web-browser-0.3.0.tgz (lib/ собран в репозитории)
 dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
 # один раз: установить бинарник Chromium
 dsh plugin --profile tui exec playwright install chromium
 ```
 
-Браузерный пакет тоже bundle — его патч (`cordis.patch.yml` в тарболе) автоматически добавляет строку browser-плагина. Обновление: `git pull` в клоне, снова `npm pack browser`, `dsh plugin add` нового тарбола.
+Браузерный пакет тоже bundle — его патч (`cordis.patch.yml` в тарболе) автоматически добавляет строку browser-плагина. Обновление: `git pull` в клоне, снова `npm pack ./browser`, `dsh plugin add` нового тарбола.
 
 ## Конфигурация
 

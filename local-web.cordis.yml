@@ -69,7 +69,7 @@
 # the local clone; keep it in a stable place):
 #
 #   git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
-#   cd <clone> && npm pack browser
+#   cd <clone> && npm pack ./browser
 #   dsh plugin --profile <name> add ./dsh-web-browser-0.3.0.tgz
 #   dsh plugin --profile <name> exec playwright install chromium
 #

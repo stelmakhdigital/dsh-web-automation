@@ -20,7 +20,7 @@ This package is a sub-directory of the `dsh-web-automation` repo, and pnpm canno
 ```sh
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 cd ~/dsh-plugins/dsh-web-automation
-npm pack browser    # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
+npm pack ./browser  # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
 dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
 # one-time: install the Chromium binary
 dsh plugin --profile tui exec playwright install chromium

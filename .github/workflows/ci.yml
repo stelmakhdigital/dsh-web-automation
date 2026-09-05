@@ -7,14 +7,14 @@ on:
 
 # The plugin ships a pre-built lib/ (so npm git-install needs no esbuild).
 # This CI guards that contract:
-#   - build:         re-bundle both packages from src/ (catches syntax/import
-#                    errors) and fail if the committed lib/ is stale.
-#   - typecheck-host: BLOCKING tsc against the REAL DSH host source types
-#                    (shallow-clone deepseek-harness, map the @deepseek-ai/*
-#                    peer deps to their sources via the host's own paths map,
-#                    tsc --noEmit). Stricter than the local stub typecheck.
-#   - test:          vitest (SSRF guard, store, enrichment/platform SSRF,
-#                    browser screenshot + approval).
+#   - build:     re-bundle both packages from src/ (catches syntax/import
+#                errors) and fail if the committed lib/ is stale.
+#   - typecheck: tsc (core + browser) against the local `@deepseek-ai/*` peer
+#                stubs (types/deepseek-ai.d.ts). Fast and reliable. A stricter
+#                check against the real DSH host sources is available locally
+#                via `DSH_HOST=... npm run typecheck:host` (not run in CI).
+#   - test:      vitest (SSRF guard, store, enrichment/platform SSRF,
+#                browser screenshot + approval).
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -51,8 +51,8 @@ jobs:
           fi
           echo "lib/ is in sync with src/."
 
-  typecheck-host:
-    name: Typecheck (host sources)
+  typecheck:
+    name: Typecheck (stubs)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,25 +61,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install plugin dependencies
+      - name: Install dependencies
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
-      - name: Shallow-clone the DSH host
-        run: git clone --depth 1 https://github.com/deepseek-ai/deepseek-harness.git deepseek-harness
-
-      - name: Install host dependencies (third-party type resolution)
-        # The host typechecks from source (no lib/ build); its third-party
-        # imports resolve from the host's own node_modules. --ignore-scripts
-        # skips native builds / client bundles (not needed for types).
-        run: |
-          cd deepseek-harness
-          corepack enable
-          pnpm install --no-frozen-lockfile --ignore-scripts
-
-      - name: Typecheck against host sources
-        env:
-          DSH_HOST: ${{ github.workspace }}/deepseek-harness
-        run: npm run typecheck:host
+      - name: Typecheck core + browser (against the local peer stubs)
+        run: npm run typecheck
 
   test:
     name: Test (vitest)

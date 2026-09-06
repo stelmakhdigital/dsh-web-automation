@@ -6,3 +6,4 @@ package-lock.json
 tsconfig.host.json
 tsconfig.host.browser.json
 types/host-stubs.d.ts
+*.tgz

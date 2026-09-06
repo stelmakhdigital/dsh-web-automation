@@ -214,8 +214,44 @@ class PlaywrightSession implements BrowserSession {
     this.ensureOpen(signal)
     const maxTextLength = options.maxTextLength ?? this.maxTextLength
     const maxElements = options.maxElements ?? this.maxElements
+    // The callback is serialized and executed IN THE PAGE: it must be fully
+    // self-contained — no references to module-scope helpers (they do not
+    // exist in the page context).
     const data = await this.page.evaluate(
       (selector: string) => {
+        /** Infer an ARIA role from a tag (and input type) when no explicit role is set. */
+        function roleFromTag(tag: string, el: Element): string {
+          if (tag === 'a') return 'link'
+          if (tag === 'button') return 'button'
+          if (tag === 'textarea') return 'textbox'
+          if (tag === 'select') return 'combobox'
+          if (tag === 'input') {
+            const type = (el.getAttribute('type') ?? 'text').toLowerCase()
+            if (type === 'checkbox') return 'checkbox'
+            if (type === 'radio') return 'radio'
+            if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
+            return 'textbox'
+          }
+          return tag
+        }
+        /** Best-effort accessible name for an element. */
+        function accessibleName(el: Element, tag: string): string {
+          const ariaLabel = el.getAttribute('aria-label')
+          if (ariaLabel !== null && ariaLabel !== '') return ariaLabel.trim()
+          if (tag === 'input') {
+            const placeholder = el.getAttribute('placeholder')
+            if (placeholder !== null && placeholder !== '') return placeholder.trim()
+            const name = el.getAttribute('name')
+            if (name !== null && name !== '') return name.trim()
+          }
+          // `textContent` is typed non-null by the DOM lib but is null for void/empty
+          // elements (e.g. an `<input>` with no placeholder or name); widen to handle it.
+          const rawText = (el as { textContent: string | null }).textContent
+          const text = (rawText ?? '').trim().replace(/\s+/g, ' ')
+          if (text !== '') return text.length > 120 ? `${text.slice(0, 117)}...` : text
+          const id = el.getAttribute('id')
+          return id !== null && id !== '' ? id : '(unnamed)'
+        }
         interface RawElement {
           role: string
           name: string
@@ -315,41 +351,6 @@ class PlaywrightSession implements BrowserSession {
     if (this.closed) throw new BrowserError('the browser session is closed; open a new one', BROWSER_CODES.NOT_OPEN)
     throwIfAborted(signal)
   }
-}
-
-/** Infer an ARIA role from a tag (and input type) when no explicit role is set. */
-function roleFromTag(tag: string, el: Element): string {
-  if (tag === 'a') return 'link'
-  if (tag === 'button') return 'button'
-  if (tag === 'textarea') return 'textbox'
-  if (tag === 'select') return 'combobox'
-  if (tag === 'input') {
-    const type = (el.getAttribute('type') ?? 'text').toLowerCase()
-    if (type === 'checkbox') return 'checkbox'
-    if (type === 'radio') return 'radio'
-    if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
-    return 'textbox'
-  }
-  return tag
-}
-
-/** Best-effort accessible name for an element. */
-function accessibleName(el: Element, tag: string): string {
-  const ariaLabel = el.getAttribute('aria-label')
-  if (ariaLabel !== null && ariaLabel !== '') return ariaLabel.trim()
-  if (tag === 'input') {
-    const placeholder = el.getAttribute('placeholder')
-    if (placeholder !== null && placeholder !== '') return placeholder.trim()
-    const name = el.getAttribute('name')
-    if (name !== null && name !== '') return name.trim()
-  }
-  // `textContent` is typed non-null by the DOM lib but is null for void/empty
-  // elements (e.g. an `<input>` with no placeholder or name); widen to handle it.
-  const rawText = (el as { textContent: string | null }).textContent
-  const text = (rawText ?? '').trim().replace(/\s+/g, ' ')
-  if (text !== '') return text.length > 120 ? `${text.slice(0, 117)}...` : text
-  const id = el.getAttribute('id')
-  return id !== null && id !== '' ? id : '(unnamed)'
 }
 
 /** Validate a navigation URL is http(s). */

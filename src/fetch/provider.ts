@@ -84,9 +84,15 @@ export class CachedHttpFetchProvider implements WebFetchProvider {
     await this.assertPublic(url)
     const key = normalizeUrl(url.toString())
     const cached = await this.limits.store.readPage(key).catch(() => undefined)
-    if (cached !== undefined && Date.now() - cached.fetchedAt < this.limits.cacheTtlMs) {
-      if (!this.limits.revalidate) return cloneResult(pageToResult(cached))
-      return await this.revalidate(url, key, cached, signal)
+    if (cached !== undefined) {
+      if (Date.now() - cached.fetchedAt < this.limits.cacheTtlMs) {
+        // Fresh: serve from cache with no network round-trip.
+        return cloneResult(pageToResult(cached))
+      }
+      // Expired: conditional revalidation when enabled — a 304 serves the
+      // stale body, a changed body falls through to a full fetch, and a
+      // transport failure serves the stale body (stale-on-error).
+      if (this.limits.revalidate) return await this.revalidate(url, key, cached, signal)
     }
     using d = deadline(signal, this.limits.timeoutMs, 'WEB_FETCH_TIMEOUT')
     return await this.fetchFresh(url, d.signal)

@@ -348,6 +348,35 @@ var PlaywrightSession = class {
     const maxElements = options.maxElements ?? this.maxElements;
     const data = await this.page.evaluate(
       (selector) => {
+        function roleFromTag(tag, el) {
+          if (tag === "a") return "link";
+          if (tag === "button") return "button";
+          if (tag === "textarea") return "textbox";
+          if (tag === "select") return "combobox";
+          if (tag === "input") {
+            const type = (el.getAttribute("type") ?? "text").toLowerCase();
+            if (type === "checkbox") return "checkbox";
+            if (type === "radio") return "radio";
+            if (type === "button" || type === "submit" || type === "reset") return "button";
+            return "textbox";
+          }
+          return tag;
+        }
+        function accessibleName(el, tag) {
+          const ariaLabel = el.getAttribute("aria-label");
+          if (ariaLabel !== null && ariaLabel !== "") return ariaLabel.trim();
+          if (tag === "input") {
+            const placeholder = el.getAttribute("placeholder");
+            if (placeholder !== null && placeholder !== "") return placeholder.trim();
+            const name2 = el.getAttribute("name");
+            if (name2 !== null && name2 !== "") return name2.trim();
+          }
+          const rawText = el.textContent;
+          const text2 = (rawText ?? "").trim().replace(/\s+/g, " ");
+          if (text2 !== "") return text2.length > 120 ? `${text2.slice(0, 117)}...` : text2;
+          const id = el.getAttribute("id");
+          return id !== null && id !== "" ? id : "(unnamed)";
+        }
         const elements2 = [];
         const nodes = Array.from(document.querySelectorAll(selector));
         let index = 0;
@@ -431,35 +460,6 @@ var PlaywrightSession = class {
     throwIfAborted(signal);
   }
 };
-function roleFromTag(tag, el) {
-  if (tag === "a") return "link";
-  if (tag === "button") return "button";
-  if (tag === "textarea") return "textbox";
-  if (tag === "select") return "combobox";
-  if (tag === "input") {
-    const type = (el.getAttribute("type") ?? "text").toLowerCase();
-    if (type === "checkbox") return "checkbox";
-    if (type === "radio") return "radio";
-    if (type === "button" || type === "submit" || type === "reset") return "button";
-    return "textbox";
-  }
-  return tag;
-}
-function accessibleName(el, tag) {
-  const ariaLabel = el.getAttribute("aria-label");
-  if (ariaLabel !== null && ariaLabel !== "") return ariaLabel.trim();
-  if (tag === "input") {
-    const placeholder = el.getAttribute("placeholder");
-    if (placeholder !== null && placeholder !== "") return placeholder.trim();
-    const name2 = el.getAttribute("name");
-    if (name2 !== null && name2 !== "") return name2.trim();
-  }
-  const rawText = el.textContent;
-  const text = (rawText ?? "").trim().replace(/\s+/g, " ");
-  if (text !== "") return text.length > 120 ? `${text.slice(0, 117)}...` : text;
-  const id = el.getAttribute("id");
-  return id !== null && id !== "" ? id : "(unnamed)";
-}
 function assertHttpUrl(url) {
   let parsed;
   try {

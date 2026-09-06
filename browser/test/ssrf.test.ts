@@ -79,6 +79,36 @@ describe('checkSsrf (browser copy) — IP literals (no DNS)', () => {
   })
 })
 
+describe('checkSsrf (browser copy) — embedded-IPv4 forms (mapped/compatible/NAT64)', () => {
+  // Regression: Node's fetch connects through these to the mapped IPv4 host,
+  // so a private IPv4 tail must be blocked even when the address is written
+  // in IPv6 notation (the URL parser keeps it as an IPv6 hostname).
+  it.each([
+    ['http://[::ffff:127.0.0.1]/', 'IPv4-mapped loopback'],
+    ['http://[::ffff:10.0.0.1]/', 'IPv4-mapped 10/8 private'],
+    ['http://[::ffff:169.254.169.254]/', 'IPv4-mapped cloud metadata'],
+    ['http://[::ffff:192.168.1.1]/', 'IPv4-mapped 192.168/16 private'],
+    ['http://[::ffff:172.16.0.1]/', 'IPv4-mapped 172.16/12 private'],
+    ['http://[::ffff:0.0.0.0]/', 'IPv4-mapped this-network'],
+    ['http://[::10.0.0.1]/', 'IPv4-compatible 10/8 private'],
+    ['http://[64:ff9b::169.254.169.254]/', 'NAT64 cloud metadata'],
+  ])('blocks %s (%s)', async (url, _label) => {
+    const result = await checkSsrf(url)
+    expect(result.allowed).toBe(false)
+    expect(result.reason).toMatch(/private|reserved/)
+  })
+
+  it('allows an IPv4-mapped address with a public tail', async () => {
+    const result = await checkSsrf('http://[::ffff:8.8.8.8]/')
+    expect(result.allowed).toBe(true)
+  })
+
+  it('allows a plain public IPv6 literal', async () => {
+    const result = await checkSsrf('http://[2606:4700:4700::1111]/')
+    expect(result.allowed).toBe(true)
+  })
+})
+
 describe('checkSsrf (browser copy) — domain resolution (DNS mock)', () => {
   it('allows a domain that resolves to a public IP', async () => {
     mockLookup.mockResolvedValueOnce(resolvedAddresses([{ address: '93.184.216.34', family: 4 }]))

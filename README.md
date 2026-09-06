@@ -128,7 +128,7 @@ Once installed and configured, the model can:
   | `browser_navigate` (Playwright) | `allowPrivateNetworks` in the `dsh-web-browser` config |
 
   Set the relevant flag to `true` only in a trusted, network-isolated environment.
-- **Browser approval** (fail-closed): `browser_open`/`browser_navigate` require approval per the `dsh-web-browser` `approval` setting (`never` | `once` | `always`). If the approval service is unavailable or the call has no agent to route it through, the action is **denied**, not silently allowed.
+- **Browser approval** (fail-closed): `browser_open`/`browser_navigate` require approval per the `dsh-web-browser` `approval` setting (`never` | `navigate` | `all` — `navigate` gates navigation and script evaluation, `all` adds clicks and typing). If the approval service is unavailable or the call has no agent to route it through, the action is **denied**, not silently allowed.
 - **Cache eviction** (LRU by usage): the store keeps at most `fetch.cacheMaxPages` page records (default 500) and `search.cacheMaxSearches` search records (default 1000), evicting the least-recently-accessed beyond the cap after each write. This keeps `web.db` bounded over time.
 
 ## Known limitations

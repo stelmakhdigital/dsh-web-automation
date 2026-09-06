@@ -63,5 +63,8 @@ test:
     - changes:
         - "src/**/*"
         - "test/**/*"
+        - "browser/src/**/*"
+        - "browser/test/**/*"
         - "package.json"
+        - "browser/package.json"
         - "vitest.config.ts"

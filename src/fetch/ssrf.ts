@@ -7,7 +7,10 @@
  * The check runs twice: once on the literal hostname (catches IP-literal
  * URLs) and once after DNS resolution (catches domains that resolve to
  * private addresses, including DNS-rebinding). A request is allowed only if
- * every resolved address is public.
+ * every resolved address is public. Embedded-IPv4 forms (IPv4-mapped
+ * `::ffff:a.b.c.d`, IPv4-compatible `::a.b.c.d`, NAT64 `64:ff9b::a.b.c.d`)
+ * are checked through their IPv4 tail, so `[::ffff:127.0.0.1]` is blocked
+ * like `127.0.0.1`.
  * @module dsh-web-automation/fetch/ssrf
  */
 
@@ -77,8 +80,43 @@ function isPrivateIpv4(text: string): boolean {
 }
 
 /**
+ * Parse an IPv6 address (hex groups with `::` compression, optional zone id)
+ * into its eight 16-bit groups.
+ * @param text - the IPv6 address string.
+ * @returns the eight 16-bit groups, or undefined when the text is not a
+ *   well-formed IPv6 address.
+ */
+function ipv6ToGroups(text: string): number[] | undefined {
+  const bare = (text.split('%')[0] ?? '').toLowerCase()
+  if (bare.length === 0) return undefined
+  const separatorIndex = bare.indexOf('::')
+  const head = separatorIndex === -1 ? bare : bare.slice(0, separatorIndex)
+  const tail = separatorIndex === -1 ? undefined : bare.slice(separatorIndex + 2)
+  const headGroups = head.length > 0 ? head.split(':') : []
+  const tailGroups = tail !== undefined && tail.length > 0 ? tail.split(':') : []
+  const groups = [...headGroups, ...tailGroups]
+  if (tail === undefined && groups.length !== 8) return undefined
+  if (tail !== undefined && groups.length > 7) return undefined
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return undefined
+  }
+  const values = groups.map(group => Number.parseInt(group, 16))
+  const missing = 8 - values.length
+  const expanded = [
+    ...values.slice(0, headGroups.length),
+    ...Array.from({ length: missing }, () => 0),
+    ...values.slice(headGroups.length),
+  ]
+  return expanded.length === 8 ? expanded : undefined
+}
+
+/**
  * Whether an IPv6 address string is private/reserved. Blocks loopback,
- * link-local, unique-local, and unspecified.
+ * link-local, unique-local, unspecified, and the embedded-IPv4 forms whose
+ * IPv4 tail is private: IPv4-mapped (`::ffff:0:0/96`), IPv4-compatible
+ * (`::/96`, deprecated), and NAT64 (`64:ff9b::/96`). Node's fetch connects
+ * through these to the mapped IPv4 host — `[::ffff:127.0.0.1]` reaches
+ * loopback — so the tail must pass the IPv4 rules, not just the IPv6 ones.
  * @param text - the IPv6 address string.
  * @returns true if the address is blocked.
  */
@@ -90,6 +128,26 @@ function isPrivateIpv6(text: string): boolean {
   if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true
   // Unique-local (fc00::/7): fc00::/8 and fd00::/8.
   if (lower.startsWith('fc') || lower.startsWith('fd')) return true
+  // Embedded-IPv4 forms: extract the 32-bit IPv4 tail and apply the IPv4 rules.
+  const groups = ipv6ToGroups(lower)
+  if (groups !== undefined) {
+    const g0 = groups[0] ?? 0
+    const g1 = groups[1] ?? 0
+    const g2 = groups[2] ?? 0
+    const g3 = groups[3] ?? 0
+    const g4 = groups[4] ?? 0
+    const g5 = groups[5] ?? 0
+    const g6 = groups[6] ?? 0
+    const g7 = groups[7] ?? 0
+    const mapped = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff
+    const compatible = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0
+    const nat64 = g0 === 0x0064 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0
+    if (mapped || compatible || nat64) {
+      const ipv4 = ((g6 << 16) | g7) >>> 0
+      const dotted = `${ipv4 >>> 24}.${(ipv4 >>> 16) & 0xff}.${(ipv4 >>> 8) & 0xff}.${ipv4 & 0xff}`
+      if (isPrivateIpv4(dotted)) return true
+    }
+  }
   return false
 }
 

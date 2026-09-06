@@ -11,7 +11,9 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin tha
 | `browser_snapshot` | Capture the page's visible text + interactive elements (a structured snapshot). |
 | `browser_click` | Click an element (by index from a snapshot, or by selector). |
 | `browser_type` | Type text into an element. |
-| `browser_screenshot` | Capture a screenshot (written to a file). |
+| `browser_evaluate` | Evaluate a JavaScript expression in the page and return its JSON result. |
+| `browser_screenshot` | Capture a screenshot (saved to a file by default; `inline: true` returns the base64 PNG in the model context). |
+| `browser_close` | Close the session and release the browser. |
 
 ## Install
 
@@ -51,7 +53,7 @@ The package is a DSH bundle — its `cordis.patch.yml` registers the `web-browse
 ## Known limitations
 
 - One tab per agent session.
-- Screenshots are written to a file (not inlined into the model context).
+- Screenshots are saved to a file by default; `browser_screenshot` with `inline: true` returns the base64 PNG in the model context instead (no size cap — a large full-page shot can bloat the context).
 - A re-render of the page invalidates snapshot element indices (re-snapshot before acting).
 
 ## License

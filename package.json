@@ -27,6 +27,7 @@
     "local-web.cordis.yml",
     "cordis.yml.example",
     "README.md",
+    "README.ru.md",
     "LICENSE"
   ],
   "dsh": {

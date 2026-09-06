@@ -132,10 +132,12 @@ export class CachedHttpFetchProvider implements WebFetchProvider {
 
   /**
    * Conditional revalidation of a TTL-expired cache entry. A 304 refreshes
-   * the timestamp and serves the stale body; anything else falls through to a
-   * full fetch. A transport failure serves the stale body (stale-on-error)
-   * rather than failing the call; caller cancellation and our own timeout
-   * still fail loudly.
+   * the timestamp and serves the stale body; a 2xx reads the new body from
+   * the conditional response itself (one request, no second full GET) and
+   * re-caches it with the fresh ETag/Last-Modified; anything else (redirects,
+   * errors) falls through to a full fetch. A transport failure serves the
+   * stale body (stale-on-error) rather than failing the call; caller
+   * cancellation and our own timeout still fail loudly.
    */
   private async revalidate(url: URL, key: string, cached: StoredPage, signal?: AbortSignal): Promise<WebFetchResult> {
     using d = deadline(signal, this.limits.timeoutMs, 'WEB_FETCH_TIMEOUT')
@@ -161,6 +163,27 @@ export class CachedHttpFetchProvider implements WebFetchProvider {
       await response.body?.cancel()
       await this.limits.store.refreshPage(key, Date.now(), cached.etag, cached.lastModified).catch(() => undefined)
       return cloneResult(pageToResult(cached))
+    }
+    if (response.status >= 200 && response.status < 300) {
+      // The conditional request already carries the new body: read and
+      // re-cache it directly instead of issuing a second full GET for the
+      // same URL. The fresh ETag/Last-Modified seed the next revalidation
+      // cycle.
+      const result = await this.readBody(response, url, d.signal)
+      const etag = response.headers.get('etag') ?? undefined
+      const lastModified = response.headers.get('last-modified') ?? undefined
+      await this.limits.store.recordPage({
+        url: result.url,
+        normalizedUrl: key,
+        fetchedAt: Date.now(),
+        ...etag !== undefined ? { etag } : {},
+        ...lastModified !== undefined ? { lastModified } : {},
+        statusCode: result.statusCode,
+        bodyKind: result.body.kind,
+        body: result.body.content,
+        truncated: result.truncated,
+      }).catch(() => undefined)
+      return result
     }
     await response.body?.cancel()
     return await this.fetchFresh(url, d.signal)

@@ -119,7 +119,7 @@ Keyless-движки (DuckDuckGo, Bing) работают без конфигур
   | `browser_navigate` (Playwright) | `allowPrivateNetworks` в конфиге `dsh-web-browser` |
 
   Ставьте соответствующий флаг в `true` только в доверенной, сетевы-изолированной среде.
-- **Browser approval** (fail-closed): `browser_open`/`browser_navigate` требуют approval согласно настройке `approval` в `dsh-web-browser` (`never` | `once` | `always`). Если approval-сервис недоступен или у вызова нет agent для маршрутизации, действие **отказывается**, а не разрешается молча.
+- **Browser approval** (fail-closed): `browser_open`/`browser_navigate` требуют approval согласно настройке `approval` в `dsh-web-browser` (`never` | `navigate` | `all` — `navigate` гейтит навигацию и оценку скриптов, `all` добавляет клики и ввод). Если approval-сервис недоступен или у вызова нет agent для маршрутизации, действие **отказывается**, а не разрешается молча.
 - **Эвакуация кэша** (LRU по использованию): хранилище хранит не более `fetch.cacheMaxPages` страниц (default 500) и `search.cacheMaxSearches` поисков (default 1000), эвакуируя наименее недавно использованные после каждой записи. Это ограничивает рост `web.db` со временем.
 
 ## Известные ограничения

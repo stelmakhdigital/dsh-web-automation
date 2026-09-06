@@ -147,7 +147,7 @@ describe('CachedHttpFetchProvider — cache behavior', () => {
     await store.close()
   })
 
-  it('expired + revalidate: a 200 serves the new body', async () => {
+  it('expired + revalidate: a 200 reads the new body from the conditional response (single request)', async () => {
     const store = makeStore()
     const key = normalizeUrl('https://example.com')
     await store.recordPage({
@@ -160,10 +160,15 @@ describe('CachedHttpFetchProvider — cache behavior', () => {
       body: '<html>stale</html>',
       truncated: false,
     })
-    fetchMock.mockImplementation(() => Promise.resolve(fakeResponse({ status: 200, body: '<html>fresh</html>', headers: { 'content-type': 'text/html' } })))
+    fetchMock.mockResolvedValue(fakeResponse({ status: 200, body: '<html>fresh</html>', headers: { 'content-type': 'text/html', etag: 'W/"v2"' } }))
     const provider = makeProvider(store)
     const result = await provider.fetch({ url: 'https://example.com' })
     expect(result.body.content).toBe('<html>fresh</html>')
+    // The new body came from the conditional response itself — exactly one request.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // The fresh ETag was re-cached to seed the next revalidation cycle.
+    const cached = await store.readPage(key)
+    expect(cached!.etag).toBe('W/"v2"')
     await store.close()
   })
 

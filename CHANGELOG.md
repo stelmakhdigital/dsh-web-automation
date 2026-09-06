@@ -42,11 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (all guarded paths + flags, browser approval fail-closed), a smoke-test
   checklist, and seam/duplicate troubleshooting rows. `cordis.yml.example` gained
   the seam pin rows and the new `allowPrivateNetworks` fields.
-- **Tests**: vitest suite (75 tests) covering the SSRF guard (IP literals, protocol
-  block, DNS rebinding, `allowPrivate` bypass, redirect hops), the store (CRUD,
-  LRU eviction, stats, clear), enrichment SSRF behavior, platform SSRF behavior,
-  browser screenshot writes, and browser approval fail-closed semantics.
+- **Tests**: vitest suite (103 tests) covering the SSRF guard (IP literals,
+  embedded-IPv4 forms, protocol block, DNS rebinding, `allowPrivate` bypass,
+  redirect hops), the store (CRUD, LRU eviction, stats, clear), enrichment SSRF
+  behavior, platform SSRF behavior, browser screenshot writes, and browser
+  approval fail-closed semantics.
 - `vitest` devDependency + `test` / `test:watch` scripts.
+
+### Fixed
+- **SSRF guard**: embedded-IPv4 forms (IPv4-mapped `::ffff:a.b.c.d`,
+  IPv4-compatible `::a.b.c.d`, NAT64 `64:ff9b::a.b.c.d`) are now checked through
+  their IPv4 tail. Previously `[::ffff:127.0.0.1]` passed the guard even though
+  Node's fetch connects to the mapped IPv4 host — a loopback/LAN/cloud-metadata
+  bypass on every guarded path (`web_fetch`, enrichment, `web_platform_search`,
+  `browser_navigate`).
+- **Revalidation**: an expired page that changed (a 200 from the conditional
+  request) is now read from the conditional response itself instead of issuing a
+  second full GET; the fresh `ETag`/`Last-Modified` are re-cached for the next
+  cycle.
+- **Docs**: browser `approval` values corrected to `never | navigate | all`
+  (README EN/RU, `cordis.yml.example`); the browser README gained
+  `browser_evaluate` / `browser_close` and the `inline: true` screenshot mode;
+  `README.ru.md` is now shipped in the package tarball; GitLab CI runs the test
+  stage on browser changes.
 
 ### Changed
 - Store schema bumped to v2 (`last_accessed_at` column + migration for existing DBs).

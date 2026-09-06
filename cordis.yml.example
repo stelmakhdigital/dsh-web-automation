@@ -89,7 +89,7 @@
 #   config:
 #     tool: true                # register the browser_* tools
 #     headless: true            # run Chromium headless
-#     approval: never           # never | once | always — per-navigation approval
+#     approval: never           # never | navigate | all — which actions require approval
 #     # timeoutMs: 30000        # per-action deadline (ms)
 #     # maxTextLength: 50000    # cap on extracted page text (chars)
 #     # maxElements: 200        # cap on snapshot elements

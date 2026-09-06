@@ -163,11 +163,53 @@ function isPrivateIpv4(text) {
   if (value === void 0) return false;
   return IPV4_BLOCKED.some(([network, prefix]) => inCidr(value, network, prefix));
 }
+function ipv6ToGroups(text) {
+  const bare = (text.split("%")[0] ?? "").toLowerCase();
+  if (bare.length === 0) return void 0;
+  const separatorIndex = bare.indexOf("::");
+  const head = separatorIndex === -1 ? bare : bare.slice(0, separatorIndex);
+  const tail = separatorIndex === -1 ? void 0 : bare.slice(separatorIndex + 2);
+  const headGroups = head.length > 0 ? head.split(":") : [];
+  const tailGroups = tail !== void 0 && tail.length > 0 ? tail.split(":") : [];
+  const groups = [...headGroups, ...tailGroups];
+  if (tail === void 0 && groups.length !== 8) return void 0;
+  if (tail !== void 0 && groups.length > 7) return void 0;
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return void 0;
+  }
+  const values = groups.map((group) => Number.parseInt(group, 16));
+  const missing = 8 - values.length;
+  const expanded = [
+    ...values.slice(0, headGroups.length),
+    ...Array.from({ length: missing }, () => 0),
+    ...values.slice(headGroups.length)
+  ];
+  return expanded.length === 8 ? expanded : void 0;
+}
 function isPrivateIpv6(text) {
   const lower = text.toLowerCase();
   if (lower === "::1" || lower === "::") return true;
   if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) return true;
   if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  const groups = ipv6ToGroups(lower);
+  if (groups !== void 0) {
+    const g0 = groups[0] ?? 0;
+    const g1 = groups[1] ?? 0;
+    const g2 = groups[2] ?? 0;
+    const g3 = groups[3] ?? 0;
+    const g4 = groups[4] ?? 0;
+    const g5 = groups[5] ?? 0;
+    const g6 = groups[6] ?? 0;
+    const g7 = groups[7] ?? 0;
+    const mapped = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 65535;
+    const compatible = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0;
+    const nat64 = g0 === 100 && g1 === 65435 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0;
+    if (mapped || compatible || nat64) {
+      const ipv4 = (g6 << 16 | g7) >>> 0;
+      const dotted = `${ipv4 >>> 24}.${ipv4 >>> 16 & 255}.${ipv4 >>> 8 & 255}.${ipv4 & 255}`;
+      if (isPrivateIpv4(dotted)) return true;
+    }
+  }
   return false;
 }
 function isIpLiteral(host) {

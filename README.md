@@ -15,6 +15,32 @@ It bundles four capabilities into one installable plugin:
 
 All state is local: the store is `$DSH_HOME/web.db`. Outbound traffic for the keyless engines is limited to DuckDuckGo and Bing.
 
+## Quick start
+
+**Prerequisites:**
+
+- **Node.js 22.19+ or 24+** — the same requirement as DSH itself; the plugin uses the built-in `node:sqlite` store.
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — either via `npx @deepseek-ai/dsh` (no install) or a source checkout (`pnpm install && pnpm run build`, then `pnpm dsh ...`).
+
+1. **Install the plugin into a profile** (the bundle overlay is applied automatically):
+
+   ```sh
+   dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+   ```
+
+2. **Boot the profile**:
+
+   ```sh
+   dsh --profile tui    # TUI
+   dsh web              # Web UI at http://127.0.0.1:3080
+   ```
+
+   At boot the plugin loads with the host: the `web` seam is pinned to the `multi` search / `cached-http` fetch providers, `web_fetch` is enabled, and `web_platform_search` plus the history tools are registered. No extra configuration is needed — every field is defaulted (keyless DuckDuckGo + Bing).
+
+3. **Verify** — run the [smoke test](#smoke-test) from a DSH session (e.g. `web_search "hello world"`).
+
+Replace `tui` with your profile name. To inspect the composed profile tree: `dsh --profile tui --dump-config`.
+
 ## Install
 
 Plugins are installed **into a DSH profile** with `dsh plugin` — each profile is its own pnpm workspace under `$DSH_HOME/profiles/<name>`. At boot, DSH symlinks the host's `@deepseek-ai/*` packages into the profile's `node_modules`, so the plugin's peer dependencies resolve to the host's own copies.
@@ -180,6 +206,27 @@ After installing and applying the overlay, verify the stack end to end (in a DSH
 4. `web_history` — shows the searches/fetches above.
 5. `web_fetch http://127.0.0.1/` — fails with `WEB_SSRF_BLOCKED` (the SSRF guard).
 6. (with `dsh-web-browser`) `browser_open` → `browser_navigate https://example.com` → `browser_screenshot` → `browser_close` — the screenshot file appears in the temp dir.
+
+## Developer workflow
+
+For working on the plugin itself (build, test, typecheck, local install):
+
+```sh
+git clone https://github.com/stelmakhdigital/dsh-web-automation.git
+cd dsh-web-automation
+npm install --legacy-peer-deps   # @deepseek-ai/* peers are provided by the host DSH at runtime
+npm run build && npm run build --prefix browser   # bundle src/ → lib/ (both packages)
+npm test                          # vitest (103 tests)
+npm run typecheck                 # tsc against the local @deepseek-ai/* stubs
+DSH_HOST=/path/to/deepseek-harness npm run typecheck:host   # strict check against the real host types
+```
+
+`lib/` and `browser/lib/` are committed and CI enforces they stay in sync with `src/`, so git/tarball installs work without esbuild. To try a local copy in a profile:
+
+```sh
+npm pack                                   # → dsh-web-automation-0.3.0.tgz
+dsh plugin --profile tui add ./dsh-web-automation-0.3.0.tgz
+```
 
 ## Troubleshooting
 

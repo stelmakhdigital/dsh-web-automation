@@ -15,6 +15,32 @@
 
 Всё состояние локальное: хранилище — `$DSH_HOME/web.db`. Исходящий трафик keyless-движков ограничен DuckDuckGo и Bing.
 
+## Быстрый старт
+
+**Требования:**
+
+- **Node.js 22.19+ или 24+** — то же требование, что и у самого DSH; плагин использует встроенный `node:sqlite` для хранилища.
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — через `npx @deepseek-ai/dsh` (без установки) или исходники (`pnpm install && pnpm run build`, дальше `pnpm dsh ...`).
+
+1. **Установите плагин в профиль** (оверлей bundle применяется автоматически):
+
+   ```sh
+   dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+   ```
+
+2. **Запустите профиль**:
+
+   ```sh
+   dsh --profile tui    # TUI
+   dsh web              # Web UI на http://127.0.0.1:3080
+   ```
+
+   При старте плагин подхватывается вместе с хостом: `web`-seam зафиксирован на search-провайдере `multi` и fetch-провайдере `cached-http`, `web_fetch` включён, зарегистрированы `web_platform_search` и history-тулы. Дополнительная конфигурация не нужна — все поля с дефолтами (keyless DuckDuckGo + Bing).
+
+3. **Проверьте** — прогоните [smoke-тест](#smoke-тест) из сессии DSH (например, `web_search "hello world"`).
+
+Замените `tui` на имя вашего профиля. Посмотреть составленное дерево профиля: `dsh --profile tui --dump-config`.
+
 ## Установка
 
 Плагины ставятся **в профиль DSH** командой `dsh plugin` — каждый профиль это отдельный pnpm-workspace в `$DSH_HOME/profiles/<name>`. При старте DSH кладёт симлинки на `@deepseek-ai/*` пакеты хоста в `node_modules` профиля, поэтому peer-зависимости плагина резолвятся к собственным копиям хоста.
@@ -171,6 +197,27 @@ dsh-web-automation:
 4. `web_history` — показывает поиски/загрузки выше.
 5. `web_fetch http://127.0.0.1/` — падает с `WEB_SSRF_BLOCKED` (SSRF-guard).
 6. (с `dsh-web-browser`) `browser_open` → `browser_navigate https://example.com` → `browser_screenshot` → `browser_close` — файл скриншота появляется в temp-каталоге.
+
+## Рабочий процесс разработчика
+
+Для работы над самим плагином (сборка, тесты, typecheck, локальная установка):
+
+```sh
+git clone https://github.com/stelmakhdigital/dsh-web-automation.git
+cd dsh-web-automation
+npm install --legacy-peer-deps   # @deepseek-ai/* peer-зависимости даёт хост DSH в рантайме
+npm run build && npm run build --prefix browser   # сборка src/ → lib/ (оба пакета)
+npm test                          # vitest (103 тестов)
+npm run typecheck                 # tsc против локальных @deepseek-ai/* stubs
+DSH_HOST=/path/to/deepseek-harness npm run typecheck:host   # строгая проверка по реальным типам хоста
+```
+
+`lib/` и `browser/lib/` закоммичены, CI следит за синхроном с `src/`, поэтому установка из git/тарбола работает без esbuild. Попробовать локальную копию в профиле:
+
+```sh
+npm pack                                   # → dsh-web-automation-0.3.0.tgz
+dsh plugin --profile tui add ./dsh-web-automation-0.3.0.tgz
+```
 
 ## Troubleshooting
 

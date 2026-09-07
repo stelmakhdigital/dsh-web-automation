@@ -274,6 +274,11 @@ declare module 'playwright' {
     close(): Promise<void>
     [key: string]: any
   }
+  export interface Frame {
+    evaluate(fn: any, ...args: any[]): Promise<any>
+    url(): string
+    [key: string]: any
+  }
   export interface Page {
     goto(url: string, options?: any): Promise<any>
     content(): Promise<string>
@@ -281,6 +286,8 @@ declare module 'playwright' {
     click(selector: string, options?: any): Promise<void>
     type(selector: string, text: string, options?: any): Promise<void>
     evaluate(fn: any, ...args: any[]): Promise<any>
+    frames(): Frame[]
+    mainFrame(): Frame
     close(): Promise<void>
     [key: string]: any
   }

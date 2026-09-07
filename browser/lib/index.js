@@ -288,6 +288,57 @@ function loadPlaywright() {
   return playwrightLoad;
 }
 var INTERACTIVE_SELECTOR = 'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="checkbox"], [role="radio"], [role="combobox"], [role="switch"]';
+function collectFrameElements(params) {
+  const helpers = {
+    /** Infer an ARIA role from a tag (and input type) when no explicit role is set. */
+    roleFromTag(tag, el) {
+      if (tag === "a") return "link";
+      if (tag === "button") return "button";
+      if (tag === "textarea") return "textbox";
+      if (tag === "select") return "combobox";
+      if (tag === "input") {
+        const type = (el.getAttribute("type") ?? "text").toLowerCase();
+        if (type === "checkbox") return "checkbox";
+        if (type === "radio") return "radio";
+        if (type === "button" || type === "submit" || type === "reset") return "button";
+        return "textbox";
+      }
+      return tag;
+    },
+    /** Best-effort accessible name for an element. */
+    accessibleName(el, tag) {
+      const ariaLabel = el.getAttribute("aria-label");
+      if (ariaLabel !== null && ariaLabel !== "") return ariaLabel.trim();
+      if (tag === "input") {
+        const placeholder = el.getAttribute("placeholder");
+        if (placeholder !== null && placeholder !== "") return placeholder.trim();
+        const name2 = el.getAttribute("name");
+        if (name2 !== null && name2 !== "") return name2.trim();
+      }
+      const rawText = el.textContent;
+      const text2 = (rawText ?? "").trim().replace(/\s+/g, " ");
+      if (text2 !== "") return text2.length > 120 ? `${text2.slice(0, 117)}...` : text2;
+      const id = el.getAttribute("id");
+      return id !== null && id !== "" ? id : "(unnamed)";
+    }
+  };
+  const elements = [];
+  const nodes = Array.from(document.querySelectorAll(params.selector));
+  let index = 0;
+  for (const el of nodes) {
+    if (el.getClientRects().length === 0) continue;
+    const ref = `@e${params.start + index + 1}`;
+    index += 1;
+    el.setAttribute("data-dsh-ref", ref);
+    const tag = el.tagName.toLowerCase();
+    const role = el.getAttribute("role") ?? helpers.roleFromTag(tag, el);
+    const name2 = helpers.accessibleName(el, tag);
+    const href = tag === "a" ? el.getAttribute("href") : null;
+    elements.push({ role, name: name2, tag, href });
+  }
+  const text = document.body.innerText;
+  return { elements, text };
+}
 var PlaywrightProvider = class {
   id = "playwright";
   headless;
@@ -365,6 +416,8 @@ var PlaywrightSession = class {
   allowPrivateNetworks;
   providerId = "playwright";
   closed = false;
+  /** Frame owning each `data-dsh-ref` from the last snapshot (main frame when absent). */
+  frameRefs = /* @__PURE__ */ new Map();
   url() {
     return this.page.url();
   }
@@ -388,69 +441,36 @@ var PlaywrightSession = class {
     this.ensureOpen(signal);
     const maxTextLength = options.maxTextLength ?? this.maxTextLength;
     const maxElements = options.maxElements ?? this.maxElements;
-    const data = await this.page.evaluate(
-      (selector) => {
-        function roleFromTag(tag, el) {
-          if (tag === "a") return "link";
-          if (tag === "button") return "button";
-          if (tag === "textarea") return "textbox";
-          if (tag === "select") return "combobox";
-          if (tag === "input") {
-            const type = (el.getAttribute("type") ?? "text").toLowerCase();
-            if (type === "checkbox") return "checkbox";
-            if (type === "radio") return "radio";
-            if (type === "button" || type === "submit" || type === "reset") return "button";
-            return "textbox";
-          }
-          return tag;
-        }
-        function accessibleName(el, tag) {
-          const ariaLabel = el.getAttribute("aria-label");
-          if (ariaLabel !== null && ariaLabel !== "") return ariaLabel.trim();
-          if (tag === "input") {
-            const placeholder = el.getAttribute("placeholder");
-            if (placeholder !== null && placeholder !== "") return placeholder.trim();
-            const name2 = el.getAttribute("name");
-            if (name2 !== null && name2 !== "") return name2.trim();
-          }
-          const rawText = el.textContent;
-          const text2 = (rawText ?? "").trim().replace(/\s+/g, " ");
-          if (text2 !== "") return text2.length > 120 ? `${text2.slice(0, 117)}...` : text2;
-          const id = el.getAttribute("id");
-          return id !== null && id !== "" ? id : "(unnamed)";
-        }
-        const elements2 = [];
-        const nodes = Array.from(document.querySelectorAll(selector));
-        let index = 0;
-        for (const el of nodes) {
-          if (el.getClientRects().length === 0) continue;
-          const ref = `@e${index + 1}`;
-          index += 1;
-          el.setAttribute("data-dsh-ref", ref);
-          const tag = el.tagName.toLowerCase();
-          const role = el.getAttribute("role") ?? roleFromTag(tag, el);
-          const name2 = accessibleName(el, tag);
-          const href = tag === "a" ? el.getAttribute("href") : null;
-          elements2.push({ role, name: name2, tag, href });
-        }
-        const text = document.body.innerText;
-        return { elements: elements2, text };
-      },
-      INTERACTIVE_SELECTOR
-    );
-    const elements = data.elements.slice(0, maxElements).map((el, i) => ({
-      ref: `@e${i + 1}`,
-      role: el.role,
-      name: el.name,
-      tag: el.tag,
-      ...el.href !== null && el.href !== "" ? { href: el.href } : {}
-    }));
-    const truncated = data.elements.length > maxElements || data.text.length > maxTextLength;
+    const frames = this.page.frames();
+    const raw = [];
+    let mainText = "";
+    for (const frame of frames) {
+      try {
+        const data = await frame.evaluate(collectFrameElements, { selector: INTERACTIVE_SELECTOR, start: raw.length });
+        if (frame === this.page.mainFrame()) mainText = data.text;
+        for (const el of data.elements) raw.push({ el, frame });
+      } catch {
+        continue;
+      }
+    }
+    const elements = raw.slice(0, maxElements).map(({ el, frame }, i) => {
+      const ref = `@e${i + 1}`;
+      this.frameRefs.set(ref, frame);
+      return {
+        ref,
+        role: el.role,
+        name: el.name,
+        tag: el.tag,
+        ...el.href !== null && el.href !== "" ? { href: el.href } : {},
+        ...frame === this.page.mainFrame() ? {} : { frame: frame.url() }
+      };
+    });
+    const truncated = raw.length > maxElements || mainText.length > maxTextLength;
     return {
       url: this.page.url(),
       title: await this.page.title().catch(() => ""),
       elements,
-      text: data.text.slice(0, maxTextLength),
+      text: mainText.slice(0, maxTextLength),
       truncated
     };
   }
@@ -495,7 +515,11 @@ var PlaywrightSession = class {
     await this.browser.close().catch(() => void 0);
   }
   locatorFor(target) {
-    return target.kind === "ref" ? this.page.locator(`[data-dsh-ref="${target.ref}"]`) : this.page.locator(target.selector);
+    if (target.kind === "ref") {
+      const frame = this.frameRefs.get(target.ref);
+      return (frame ?? this.page).locator(`[data-dsh-ref="${target.ref}"]`);
+    }
+    return this.page.locator(target.selector);
   }
   ensureOpen(signal) {
     if (this.closed) throw new BrowserError("the browser session is closed; open a new one", BROWSER_CODES.NOT_OPEN);
@@ -555,16 +579,26 @@ function renderSnapshot(value) {
   if (value.elements.length === 0) {
     lines.push("No interactive elements.");
   } else {
-    lines.push("Interactive elements (click/type by ref or selector):");
+    lines.push("Interactive elements (click/type by ref or selector; elements in child frames are marked):");
     for (const el of value.elements) {
       const href = el.href !== void 0 ? ` (${el.href})` : "";
-      lines.push(`  ${el.ref} [${el.role}] "${el.name}"${href}`);
+      const frame = el.frame !== void 0 ? ` [in iframe: ${frameLabel(el.frame)}]` : "";
+      lines.push(`  ${el.ref} [${el.role}] "${el.name}"${href}${frame}`);
     }
   }
   lines.push("", "Page text:");
   lines.push(value.text === "" ? "(empty)" : value.text);
   if (value.truncated) lines.push("(truncated)");
   return lines.join("\n");
+}
+function frameLabel(url) {
+  if (!url || url === "about:blank" || url === "about:srcdoc") return "about:blank";
+  try {
+    const origin = new URL(url).origin;
+    return origin === "null" ? url : origin;
+  } catch {
+    return url;
+  }
 }
 function assertHttpUrl2(url) {
   let parsed;
@@ -681,7 +715,8 @@ function registerBrowserTools(ctx, options) {
                 role: { type: "string", required: true },
                 name: { type: "string", required: true },
                 tag: { type: "string", required: true },
-                href: { type: "string" }
+                href: { type: "string" },
+                frame: { type: "string" }
               }
             }
           },

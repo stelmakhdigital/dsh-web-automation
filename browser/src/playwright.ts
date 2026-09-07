@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-web-browser/playwright
  */
 
-import type { Browser, Page } from 'playwright'
+import type { Browser, Frame, Page } from 'playwright'
 import { checkSsrf } from './ssrf.ts'
 import type {
   BrowserElement,
@@ -99,6 +99,86 @@ const INTERACTIVE_SELECTOR =
   'a[href], button, input, textarea, select, [role="button"], [role="link"], '
   + '[role="textbox"], [role="checkbox"], [role="radio"], [role="combobox"], [role="switch"]'
 
+/** Raw element shape returned by the frame-side collector. */
+interface RawSnapshotElement {
+  role: string
+  name: string
+  tag: string
+  href: string | null
+}
+
+/**
+ * Frame-side interactive-element collector. Passed to `frame.evaluate`: Playwright
+ * serializes this function via `toString()` and runs it in the frame's document
+ * context, so it must stay self-contained (no references to module-scope values —
+ * only types, which are erased at compile time).
+ *
+ * TRANSPILE-SAFETY: host runtimes may transpile this source with esbuild
+ * `keepNames`, which injects module-scope `__name(...)` helper calls into the
+ * bodies of NAMED function declarations and named const-assigned function
+ * expressions. Those helpers do not exist in the page context and would throw
+ * `ReferenceError: __name is not defined`. Object method shorthand is immune
+ * (the method name comes from the property key), so the helpers live in an
+ * object literal. Do not reintroduce inner `function` declarations or
+ * `const fn = (...) =>` bindings here.
+ *
+ * `start` is the running element count from earlier frames so `data-dsh-ref`
+ * numbering stays contiguous across the whole page.
+ */
+function collectFrameElements(params: { selector: string; start: number }): { elements: RawSnapshotElement[]; text: string } {
+  const helpers = {
+    /** Infer an ARIA role from a tag (and input type) when no explicit role is set. */
+    roleFromTag(tag: string, el: Element): string {
+      if (tag === 'a') return 'link'
+      if (tag === 'button') return 'button'
+      if (tag === 'textarea') return 'textbox'
+      if (tag === 'select') return 'combobox'
+      if (tag === 'input') {
+        const type = (el.getAttribute('type') ?? 'text').toLowerCase()
+        if (type === 'checkbox') return 'checkbox'
+        if (type === 'radio') return 'radio'
+        if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
+        return 'textbox'
+      }
+      return tag
+    },
+    /** Best-effort accessible name for an element. */
+    accessibleName(el: Element, tag: string): string {
+      const ariaLabel = el.getAttribute('aria-label')
+      if (ariaLabel !== null && ariaLabel !== '') return ariaLabel.trim()
+      if (tag === 'input') {
+        const placeholder = el.getAttribute('placeholder')
+        if (placeholder !== null && placeholder !== '') return placeholder.trim()
+        const name = el.getAttribute('name')
+        if (name !== null && name !== '') return name.trim()
+      }
+      // `textContent` is typed non-null by the DOM lib but is null for void/empty
+      // elements (e.g. an `<input>` with no placeholder or name); widen to handle it.
+      const rawText = (el as { textContent: string | null }).textContent
+      const text = (rawText ?? '').trim().replace(/\s+/g, ' ')
+      if (text !== '') return text.length > 120 ? `${text.slice(0, 117)}...` : text
+      const id = el.getAttribute('id')
+      return id !== null && id !== '' ? id : '(unnamed)'
+    },
+  }
+  const elements: RawSnapshotElement[] = []
+  const nodes = Array.from(document.querySelectorAll(params.selector))
+  let index = 0
+  for (const el of nodes) {
+    if (el.getClientRects().length === 0) continue
+    const ref = `@e${params.start + index + 1}`
+    index += 1
+    el.setAttribute('data-dsh-ref', ref)
+    const tag = el.tagName.toLowerCase()
+    const role = el.getAttribute('role') ?? helpers.roleFromTag(tag, el)
+    const name = helpers.accessibleName(el, tag)
+    const href = tag === 'a' ? el.getAttribute('href') : null
+    elements.push({ role, name, tag, href })
+  }
+  const text = document.body.innerText
+  return { elements, text }
+}
+
 /**
  * The Playwright-backed browser provider.
  */
@@ -176,6 +256,8 @@ export class PlaywrightProvider implements BrowserProvider {
 class PlaywrightSession implements BrowserSession {
   readonly providerId = 'playwright'
   private closed = false
+  /** Frame owning each `data-dsh-ref` from the last snapshot (main frame when absent). */
+  private readonly frameRefs = new Map<string, Frame>()
 
   constructor(
     private readonly browser: Browser,
@@ -214,82 +296,40 @@ class PlaywrightSession implements BrowserSession {
     this.ensureOpen(signal)
     const maxTextLength = options.maxTextLength ?? this.maxTextLength
     const maxElements = options.maxElements ?? this.maxElements
-    // The callback is serialized and executed IN THE PAGE: it must be fully
-    // self-contained — no references to module-scope helpers (they do not
-    // exist in the page context).
-    const data = await this.page.evaluate(
-      (selector: string) => {
-        /** Infer an ARIA role from a tag (and input type) when no explicit role is set. */
-        function roleFromTag(tag: string, el: Element): string {
-          if (tag === 'a') return 'link'
-          if (tag === 'button') return 'button'
-          if (tag === 'textarea') return 'textbox'
-          if (tag === 'select') return 'combobox'
-          if (tag === 'input') {
-            const type = (el.getAttribute('type') ?? 'text').toLowerCase()
-            if (type === 'checkbox') return 'checkbox'
-            if (type === 'radio') return 'radio'
-            if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
-            return 'textbox'
-          }
-          return tag
-        }
-        /** Best-effort accessible name for an element. */
-        function accessibleName(el: Element, tag: string): string {
-          const ariaLabel = el.getAttribute('aria-label')
-          if (ariaLabel !== null && ariaLabel !== '') return ariaLabel.trim()
-          if (tag === 'input') {
-            const placeholder = el.getAttribute('placeholder')
-            if (placeholder !== null && placeholder !== '') return placeholder.trim()
-            const name = el.getAttribute('name')
-            if (name !== null && name !== '') return name.trim()
-          }
-          // `textContent` is typed non-null by the DOM lib but is null for void/empty
-          // elements (e.g. an `<input>` with no placeholder or name); widen to handle it.
-          const rawText = (el as { textContent: string | null }).textContent
-          const text = (rawText ?? '').trim().replace(/\s+/g, ' ')
-          if (text !== '') return text.length > 120 ? `${text.slice(0, 117)}...` : text
-          const id = el.getAttribute('id')
-          return id !== null && id !== '' ? id : '(unnamed)'
-        }
-        interface RawElement {
-          role: string
-          name: string
-          tag: string
-          href: string | null
-        }
-        const elements: RawElement[] = []
-        const nodes = Array.from(document.querySelectorAll(selector))
-        let index = 0
-        for (const el of nodes) {
-          if (el.getClientRects().length === 0) continue
-          const ref = `@e${index + 1}`
-          index += 1
-          el.setAttribute('data-dsh-ref', ref)
-          const tag = el.tagName.toLowerCase()
-          const role = el.getAttribute('role') ?? roleFromTag(tag, el)
-          const name = accessibleName(el, tag)
-          const href = tag === 'a' ? el.getAttribute('href') : null
-          elements.push({ role, name, tag, href })
-        }
-        const text = document.body.innerText
-        return { elements, text }
-      },
-      INTERACTIVE_SELECTOR,
-    )
-    const elements: BrowserElement[] = data.elements.slice(0, maxElements).map((el: BrowserElement, i: number) => ({
-      ref: `@e${i + 1}`,
-      role: el.role,
-      name: el.name,
-      tag: el.tag,
-      ...(el.href !== null && el.href !== '' ? { href: el.href } : {}),
-    }))
-    const truncated = data.elements.length > maxElements || data.text.length > maxTextLength
+    // Collect interactive elements from the main frame and every child frame
+    // (e.g. reCAPTCHA iframes). `collectFrameElements` runs in each frame's
+    // document context; refs are numbered contiguously across frames so a
+    // click/type can be routed to the right frame via `frameRefs`.
+    const frames = this.page.frames()
+    const raw: { el: RawSnapshotElement; frame: Frame }[] = []
+    let mainText = ''
+    for (const frame of frames) {
+      try {
+        const data = await frame.evaluate(collectFrameElements, { selector: INTERACTIVE_SELECTOR, start: raw.length })
+        if (frame === this.page.mainFrame()) mainText = data.text
+        for (const el of data.elements) raw.push({ el, frame })
+      } catch {
+        continue // Frame detached or inaccessible mid-snapshot.
+      }
+    }
+    const elements: BrowserElement[] = raw.slice(0, maxElements).map(({ el, frame }, i) => {
+      const ref = `@e${i + 1}`
+      this.frameRefs.set(ref, frame)
+      return {
+        ref,
+        role: el.role,
+        name: el.name,
+        tag: el.tag,
+        ...(el.href !== null && el.href !== '' ? { href: el.href } : {}),
+        ...(frame === this.page.mainFrame() ? {} : { frame: frame.url() }),
+      }
+    })
+    const truncated = raw.length > maxElements || mainText.length > maxTextLength
     return {
       url: this.page.url(),
       title: await this.page.title().catch(() => ''),
       elements,
-      text: data.text.slice(0, maxTextLength),
+      text: mainText.slice(0, maxTextLength),
       truncated,
     }
   }
@@ -342,9 +382,13 @@ class PlaywrightSession implements BrowserSession {
   }
 
   private locatorFor(target: BrowserTarget) {
-    return target.kind === 'ref'
-      ? this.page.locator(`[data-dsh-ref="${target.ref}"]`)
-      : this.page.locator(target.selector)
+    if (target.kind === 'ref') {
+      // Refs are scoped to the frame that produced them (last snapshot); route
+      // into that frame so child-frame elements (e.g. reCAPTCHA iframes) resolve.
+      const frame = this.frameRefs.get(target.ref)
+      return (frame ?? this.page).locator(`[data-dsh-ref="${target.ref}"]`)
+    }
+    return this.page.locator(target.selector)
   }
 
   private ensureOpen(signal?: AbortSignal): void {

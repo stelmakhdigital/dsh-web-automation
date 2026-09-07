@@ -40,16 +40,29 @@ function renderSnapshot(
   if (value.elements.length === 0) {
     lines.push('No interactive elements.')
   } else {
-    lines.push('Interactive elements (click/type by ref or selector):')
+    lines.push('Interactive elements (click/type by ref or selector; elements in child frames are marked):')
     for (const el of value.elements) {
       const href = el.href !== undefined ? ` (${el.href})` : ''
-      lines.push(`  ${el.ref} [${el.role}] "${el.name}"${href}`)
+      const frame = el.frame !== undefined ? ` [in iframe: ${frameLabel(el.frame)}]` : ''
+      lines.push(`  ${el.ref} [${el.role}] "${el.name}"${href}${frame}`)
     }
   }
   lines.push('', 'Page text:')
   lines.push(value.text === '' ? '(empty)' : value.text)
   if (value.truncated) lines.push('(truncated)')
   return lines.join('\n')
+}
+
+/** Short human-readable label for a child-frame URL (its origin, or a marker for blank/opaque-origin frames). */
+function frameLabel(url: string): string {
+  if (!url || url === 'about:blank' || url === 'about:srcdoc') return 'about:blank'
+  try {
+    // Opaque origins (about:*, data:) report origin "null" — fall back to the URL itself.
+    const origin = new URL(url).origin
+    return origin === 'null' ? url : origin
+  } catch {
+    return url
+  }
 }
 
 /** Validate a navigation URL is http(s) (enforced at the tool boundary, provider-agnostic). */
@@ -181,6 +194,7 @@ export function registerBrowserTools(ctx: Context, options: BrowserToolOptions):
                 name: { type: 'string', required: true },
                 tag: { type: 'string', required: true },
                 href: { type: 'string' },
+                frame: { type: 'string' },
               },
             },
           },

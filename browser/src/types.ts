@@ -71,6 +71,8 @@ export interface BrowserElement {
   readonly tag: string
   /** The href, for links. */
   readonly href?: string
+  /** The URL of the child frame containing the element (omitted for the main frame). */
+  readonly frame?: string
 }
 
 /** A normalized view of the current page for a model to reason over. */
@@ -79,7 +81,7 @@ export interface BrowserSnapshot {
   readonly url: string
   /** The document title. */
   readonly title: string
-  /** Interactive elements, in DOM order, each addressable by `ref`. */
+  /** Interactive elements (main frame first, then child frames in DOM order), each addressable by `ref`. */
   readonly elements: readonly BrowserElement[]
   /** The visible page text, truncated to `maxTextLength`. */
   readonly text: string

@@ -4,7 +4,7 @@
 #
 #   git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
 #   cd <clone> && npm pack ./browser
-#   dsh plugin --profile <name> add ./dsh-web-browser-0.3.0.tgz
+#   dsh plugin --profile <name> add ./dsh-web-browser-0.4.0.tgz
 #   dsh plugin --profile <name> exec playwright install chromium
 #
 # (pnpm cannot install a sub-directory of a git repo — hence the local clone.

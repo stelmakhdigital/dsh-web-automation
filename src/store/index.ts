@@ -182,32 +182,56 @@ export class WebStore {
     }
     const db = new DatabaseSync(this.options.path)
     db.exec('PRAGMA journal_mode = WAL')
-    db.exec(WEB_STORE_SCHEMA)
+    // The version stamp lives in web_meta, which must exist before migration
+    // can read it. Create just that table first so migration runs BEFORE the
+    // full DDL: the DDL's index statements reference columns that older files
+    // lack, so running it first would fail (no such column) before the
+    // migration that adds those columns could ever run.
+    db.exec('CREATE TABLE IF NOT EXISTS web_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);')
     this.migrate(db)
+    db.exec(WEB_STORE_SCHEMA)
     return db
   }
 
   /**
    * Apply pending schema migrations. Reads the stored version; if it is older
    * than {@link WEB_STORE_SCHEMA_VERSION}, runs each migration in order and
-   * records the new version. A missing version (a brand-new file) means the
-   * schema DDL already created the current shape, so the version is stamped to
-   * the current one and no migration runs. An existing v1 file (created before
-   * the LRU column) is upgraded via the ALTER-based migrations.
-   * @param db - the open database handle.
+   * records the new version. A missing version is resolved by probing the
+   * actual shape: a missing `web_searches` table means a brand-new file (the
+   * DDL will create the current shape, so only the version is stamped), while
+   * an existing table without the LRU column means a pre-versioning file,
+   * upgraded via the ALTER-based migrations. Must run BEFORE the full schema
+   * DDL, whose index statements reference columns older files lack.
+   * @param db - the open database handle (web_meta already created).
    */
   private migrate(db: DatabaseSync): void {
     const row = db.prepare('SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string } | undefined
+    let current: number
     if (row === undefined) {
-      // Brand-new database: the schema DDL already created the current shape.
-      db.prepare('INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
-        'schema_version',
-        String(WEB_STORE_SCHEMA_VERSION),
-      )
+      // No version stamp. Either a brand-new file (web_meta was just created
+      // and the DDL will build the current shape) or a pre-versioning file
+      // (created before the stamp existed). Probe the actual shape to tell
+      // them apart: a missing web_searches table means brand-new, a table
+      // without the LRU column means the oldest known version.
+      const columns = db.prepare('PRAGMA table_info(web_searches)').all() as Array<{ name: string }>
+      if (columns.length === 0) {
+        current = WEB_STORE_SCHEMA_VERSION
+      } else {
+        current = columns.some(column => column.name === 'last_accessed_at') ? WEB_STORE_SCHEMA_VERSION : 1
+      }
+    } else {
+      current = Number(row.value)
+    }
+    if (current >= WEB_STORE_SCHEMA_VERSION) {
+      if (row === undefined) {
+        // Brand-new database: stamp the version the DDL is about to create.
+        db.prepare('INSERT OR REPLACE INTO web_meta (key, value) VALUES (?, ?)').run(
+          'schema_version',
+          String(WEB_STORE_SCHEMA_VERSION),
+        )
+      }
       return
     }
-    const current = Number(row.value)
-    if (current >= WEB_STORE_SCHEMA_VERSION) return
     for (const migration of WEB_STORE_MIGRATIONS) {
       if (migration.from < current) continue
       if (migration.from >= WEB_STORE_SCHEMA_VERSION) break

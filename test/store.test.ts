@@ -1,5 +1,10 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { WebStore } from '../src/store/index.ts'
+import { WEB_STORE_SCHEMA_VERSION } from '../src/store/schema.ts'
 
 /** Create an in-memory store (no file I/O). */
 function makeStore(evictLimits?: { maxSearches?: number; maxPages?: number }): WebStore {
@@ -199,5 +204,115 @@ describe('WebStore — stats + clear', () => {
     expect(stats.searches).toBe(0)
     expect(stats.pages).toBe(0)
     await store.close()
+  })
+})
+
+/** The legacy v1 schema (before the LRU column and version stamping). */
+const V1_SCHEMA = `
+CREATE TABLE web_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE web_searches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cache_key TEXT NOT NULL UNIQUE,
+  query TEXT NOT NULL,
+  engines TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  sources TEXT NOT NULL,
+  truncated INTEGER NOT NULL DEFAULT 0,
+  content TEXT
+);
+CREATE TABLE web_pages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  url TEXT NOT NULL,
+  normalized_url TEXT NOT NULL UNIQUE,
+  fetched_at INTEGER NOT NULL,
+  etag TEXT,
+  last_modified TEXT,
+  status_code INTEGER NOT NULL,
+  body_kind TEXT NOT NULL,
+  body TEXT NOT NULL,
+  truncated INTEGER NOT NULL DEFAULT 0
+);
+`
+
+/** Create a temp directory for a file-backed store. */
+function makeTempDb(): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'web-store-migration-'))
+  return {
+    path: join(dir, 'web.db'),
+    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+  }
+}
+
+describe('WebStore — schema migration', () => {
+  it('migrates a stamped v1 file to the current schema, keeping data', async () => {
+    const { path, cleanup } = makeTempDb()
+    try {
+      const legacy = new DatabaseSync(path)
+      legacy.exec(V1_SCHEMA)
+      legacy.prepare('INSERT INTO web_meta (key, value) VALUES (?, ?)').run('schema_version', '1')
+      legacy.prepare('INSERT INTO web_searches (cache_key, query, engines, created_at, sources, truncated) VALUES (?, ?, ?, ?, ?, ?)')
+        .run('k1', 'legacy query', '["ddg"]', 1234, '[]', 0)
+      legacy.prepare('INSERT INTO web_pages (url, normalized_url, fetched_at, status_code, body_kind, body, truncated) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('https://legacy.com', 'legacy.com', 1234, 200, 'text', 'legacy body', 0)
+      legacy.close()
+
+      const store = new WebStore({ path })
+      const search = await store.readSearch('k1')
+      expect(search?.query).toBe('legacy query')
+      const page = await store.readPage('legacy.com')
+      expect(page?.body).toBe('legacy body')
+      const stats = await store.stats()
+      expect(stats.searches).toBe(1)
+      expect(stats.pages).toBe(1)
+      await store.close()
+
+      const verify = new DatabaseSync(path, { readOnly: true })
+      const version = verify.prepare('SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string }
+      expect(version.value).toBe(String(WEB_STORE_SCHEMA_VERSION))
+      const columns = verify.prepare('PRAGMA table_info(web_searches)').all() as Array<{ name: string }>
+      expect(columns.map(column => column.name)).toContain('last_accessed_at')
+      verify.close()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('migrates a pre-versioning file (no schema_version row)', async () => {
+    const { path, cleanup } = makeTempDb()
+    try {
+      const legacy = new DatabaseSync(path)
+      legacy.exec(V1_SCHEMA)
+      // No schema_version row at all (a file created before version tracking).
+      legacy.close()
+
+      const store = new WebStore({ path })
+      await store.recordSearch({ cacheKey: 'k1', query: 'q', engines: ['ddg'], createdAt: Date.now(), sources: [], truncated: false })
+      const stats = await store.stats()
+      expect(stats.searches).toBe(1)
+      await store.close()
+
+      const verify = new DatabaseSync(path, { readOnly: true })
+      const version = verify.prepare('SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string }
+      expect(version.value).toBe(String(WEB_STORE_SCHEMA_VERSION))
+      verify.close()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('stamps a brand-new file with the current version', async () => {
+    const { path, cleanup } = makeTempDb()
+    try {
+      const store = new WebStore({ path })
+      await store.recordSearch({ cacheKey: 'k1', query: 'q', engines: ['ddg'], createdAt: Date.now(), sources: [], truncated: false })
+      await store.close()
+
+      const verify = new DatabaseSync(path, { readOnly: true })
+      const version = verify.prepare('SELECT value FROM web_meta WHERE key = ?').get('schema_version') as { value: string }
+      expect(version.value).toBe(String(WEB_STORE_SCHEMA_VERSION))
+      verify.close()
+    } finally {
+      cleanup()
+    }
   })
 })

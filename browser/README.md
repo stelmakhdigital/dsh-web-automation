@@ -23,9 +23,9 @@ This package is a sub-directory of the `dsh-web-automation` repo, and pnpm canno
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 cd ~/dsh-plugins/dsh-web-automation
 npm pack ./browser  # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
-dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
+dsh plugin --profile web add ./dsh-web-browser-0.3.0.tgz
 # one-time: install the Chromium binary
-dsh plugin --profile tui exec playwright install chromium
+dsh plugin --profile web exec playwright install chromium
 ```
 
 The package is a DSH bundle — its `cordis.patch.yml` registers the `web-browser` plugin row automatically (install the core `dsh-web-automation` bundle first for the `web` seam pin + `tool-web` row).

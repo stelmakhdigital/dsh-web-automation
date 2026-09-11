@@ -9,7 +9,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import { BUILTIN_PLATFORMS } from './builtins.ts'
@@ -38,7 +38,7 @@ export const name = 'web-platforms'
 export const inject = ['tools', 'systemPrompt']
 
 /** Settings namespace carrying the web platform tool configuration. */
-export const WEB_PLATFORMS_SETTINGS_NAMESPACE = settingsNamespace('web-platforms')
+export const WEB_PLATFORMS_SETTINGS_NAMESPACE = 'web-platforms'
 
 /** Default cap on sources returned by one `web_platform_search` call. */
 export const DEFAULT_PLATFORM_MAX_RESULTS = 20
@@ -134,11 +134,13 @@ export function apply(ctx: Context, config: Config): void {
   // built once from the current section, so a committed change needs no
   // re-registration here.
   let current: () => Config = () => config
-  installSettingsSection(ctx, WEB_PLATFORMS_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source: () => Config) => {
-      current = source
-    },
-    onChange: () => {},
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, WEB_PLATFORMS_SETTINGS_NAMESPACE, Config, config, {
+      setSource: (source: () => Config) => {
+        current = source
+      },
+      onChange: () => {},
+    })
   })
   // schemastery (Config) has already filled every defaulted field.
   const resolved = current() as ResolvedConfig

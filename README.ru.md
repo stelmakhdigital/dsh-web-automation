@@ -25,21 +25,21 @@
 1. **Установите плагин в профиль** (оверлей bundle применяется автоматически):
 
    ```sh
-   dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+   dsh plugin --profile web add git+https://github.com/stelmakhdigital/dsh-web-automation.git
    ```
 
 2. **Запустите профиль**:
 
    ```sh
-   dsh --profile tui    # TUI
    dsh web              # Web UI на http://127.0.0.1:3080
+   dsh --profile tui    # TUI (если ставили в профиль `tui`)
    ```
 
    При старте плагин подхватывается вместе с хостом: `web`-seam зафиксирован на search-провайдере `multi` и fetch-провайдере `cached-http`, `web_fetch` включён, зарегистрированы `web_platform_search` и history-тулы. Дополнительная конфигурация не нужна — все поля с дефолтами (keyless DuckDuckGo + Bing).
 
 3. **Проверьте** — прогоните [smoke-тест](#smoke-тест) из сессии DSH (например, `web_search "hello world"`).
 
-Замените `tui` на имя вашего профиля. Посмотреть составленное дерево профиля: `dsh --profile tui --dump-config`.
+Замените `web` на имя вашего профиля. Посмотреть составленное дерево профиля: `dsh --profile web --dump-config`.
 
 ## Установка
 
@@ -48,15 +48,15 @@
 Этот пакет — **DSH bundle**: в `package.json` объявлено `dsh.bundle`, поэтому при установке автоматически применяется поставляемый оверлей [`local-web.cordis.yml`](local-web.cordis.yml) — он фиксирует `web`-seam на провайдерах плагина, включает `web_fetch` в строке `tool-web` хоста и регистрирует плагин. Ручной `--patch` не нужен:
 
 ```sh
-dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+dsh plugin --profile web add git+https://github.com/stelmakhdigital/dsh-web-automation.git
 ```
 
-(Замените `tui` на имя вашего профиля. Фиксация seam **обязательна**: без неё seam видит два пригодных search-провайдера (дефолт деплоя + `multi`) и падает с `WEB_PROVIDER_AMBIGUOUS`.)
+(Замените `web` на имя вашего профиля. Фиксация seam **обязательна**: без неё seam видит два пригодных search-провайдера (дефолт деплоя + `multi`) и падает с `WEB_PROVIDER_AMBIGUOUS`.)
 
 Ручной вариант — если хочется сначала поправить конфиг, примените оверлей сами:
 
 ```sh
-dsh --profile tui --patch "$PWD/local-web.cordis.yml"
+dsh --profile web --patch "$PWD/local-web.cordis.yml"
 ```
 
 ### Опционально: browser automation
@@ -69,9 +69,9 @@ dsh --profile tui --patch "$PWD/local-web.cordis.yml"
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 cd ~/dsh-plugins/dsh-web-automation
 npm pack ./browser   # → dsh-web-browser-0.3.0.tgz (lib/ собран в репозитории)
-dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
+dsh plugin --profile web add ./dsh-web-browser-0.3.0.tgz
 # один раз: установить бинарник Chromium
-dsh plugin --profile tui exec playwright install chromium
+dsh plugin --profile web exec playwright install chromium
 ```
 
 Браузерный пакет тоже bundle — его патч (`cordis.patch.yml` в тарболе) автоматически добавляет строку browser-плагина. Обновление: `git pull` в клоне, снова `npm pack ./browser`, `dsh plugin add` нового тарбола.
@@ -207,7 +207,7 @@ git clone https://github.com/stelmakhdigital/dsh-web-automation.git
 cd dsh-web-automation
 npm install --legacy-peer-deps   # @deepseek-ai/* peer-зависимости даёт хост DSH в рантайме
 npm run build && npm run build --prefix browser   # сборка src/ → lib/ (оба пакета)
-npm test                          # vitest (103 тестов)
+npm test                          # vitest (106 тестов)
 npm run typecheck                 # tsc против локальных @deepseek-ai/* stubs
 DSH_HOST=/path/to/deepseek-harness npm run typecheck:host   # строгая проверка по реальным типам хоста
 ```
@@ -216,7 +216,7 @@ DSH_HOST=/path/to/deepseek-harness npm run typecheck:host   # строгая п�
 
 ```sh
 npm pack                                   # → dsh-web-automation-0.3.0.tgz
-dsh plugin --profile tui add ./dsh-web-automation-0.3.0.tgz
+dsh plugin --profile web add ./dsh-web-automation-0.3.0.tgz
 ```
 
 ## Troubleshooting
@@ -225,6 +225,7 @@ dsh plugin --profile tui add ./dsh-web-automation-0.3.0.tgz
 |---|---|---|
 | `ERESOLVE` peer conflict при установке | Peer deps отсутствуют вне DSH-деплоя | `npm install --legacy-peer-deps` |
 | `Cannot find module '@deepseek-ai/...'` | Плагин установлен без пакетов DSH | Сначала установите DSH (peers резолвятся к версиям хоста) |
+| `does not provide an export named 'installSettingsSection'` | Плагин собран под старый API настроек DSH | Обновите плагин (текущий DSH: `ctx.settings.installSection`) и переустановите |
 | `WEB_PROVIDER_AMBIGUOUS` при старте | `web`-seam видит два пригодных search-провайдера | Добавьте строку фикса `web`-seam (`searchProvider: multi`, `fetchProvider: cached-http`) — см. оверлей |
 | `WEB_DUPLICATE_PROVIDER` при старте | Загружены и плагин, и встроенные web-пакеты DSH | Оставьте один — удалите встроенные строки (или строку плагина); см. «Отношение к встроенным web-пакетам DSH» |
 | `web_fetch` заблокирован (SSRF) | Цель — loopback/private/link-local | `fetch.allowPrivateNetworks: true` (только в доверенной среде) |

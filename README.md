@@ -25,21 +25,21 @@ All state is local: the store is `$DSH_HOME/web.db`. Outbound traffic for the ke
 1. **Install the plugin into a profile** (the bundle overlay is applied automatically):
 
    ```sh
-   dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+   dsh plugin --profile web add git+https://github.com/stelmakhdigital/dsh-web-automation.git
    ```
 
 2. **Boot the profile**:
 
    ```sh
-   dsh --profile tui    # TUI
    dsh web              # Web UI at http://127.0.0.1:3080
+   dsh --profile tui    # TUI (if you installed into `tui` instead)
    ```
 
    At boot the plugin loads with the host: the `web` seam is pinned to the `multi` search / `cached-http` fetch providers, `web_fetch` is enabled, and `web_platform_search` plus the history tools are registered. No extra configuration is needed — every field is defaulted (keyless DuckDuckGo + Bing).
 
 3. **Verify** — run the [smoke test](#smoke-test) from a DSH session (e.g. `web_search "hello world"`).
 
-Replace `tui` with your profile name. To inspect the composed profile tree: `dsh --profile tui --dump-config`.
+Replace `web` with your profile name. To inspect the composed profile tree: `dsh --profile web --dump-config`.
 
 ## Install
 
@@ -48,15 +48,15 @@ Plugins are installed **into a DSH profile** with `dsh plugin` — each profile 
 This package is a **DSH bundle**: its `package.json` declares `dsh.bundle`, so installing it automatically applies the shipped [`local-web.cordis.yml`](local-web.cordis.yml) overlay — it pins the `web` seam to the plugin's providers, enables `web_fetch` in the host `tool-web` row, and registers the plugin. No manual `--patch` needed:
 
 ```sh
-dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+dsh plugin --profile web add git+https://github.com/stelmakhdigital/dsh-web-automation.git
 ```
 
-(Replace `tui` with your profile name. The seam pin is **required**: without it the seam sees two usable search providers (the deployment default plus `multi`) and fails with `WEB_PROVIDER_AMBIGUOUS`.)
+(Replace `web` with your profile name. The seam pin is **required**: without it the seam sees two usable search providers (the deployment default plus `multi`) and fails with `WEB_PROVIDER_AMBIGUOUS`.)
 
 Manual alternative — if you want to tweak the config before applying, apply the overlay yourself:
 
 ```sh
-dsh --profile tui --patch "$PWD/local-web.cordis.yml"
+dsh --profile web --patch "$PWD/local-web.cordis.yml"
 ```
 
 ### Optional: browser automation
@@ -69,9 +69,9 @@ It is a sub-directory of this repo, and pnpm cannot install a sub-directory of a
 git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git ~/dsh-plugins/dsh-web-automation
 cd ~/dsh-plugins/dsh-web-automation
 npm pack ./browser  # → dsh-web-browser-0.3.0.tgz (lib/ is prebuilt in the repo)
-dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
+dsh plugin --profile web add ./dsh-web-browser-0.3.0.tgz
 # one-time: install the Chromium binary
-dsh plugin --profile tui exec playwright install chromium
+dsh plugin --profile web exec playwright install chromium
 ```
 
 The browser package is a bundle too — its patch (`cordis.patch.yml` in the tarball) registers the browser plugin row automatically. To update: `git pull` in the clone, `npm pack ./browser` again, and `dsh plugin add` the new tarball.
@@ -216,7 +216,7 @@ git clone https://github.com/stelmakhdigital/dsh-web-automation.git
 cd dsh-web-automation
 npm install --legacy-peer-deps   # @deepseek-ai/* peers are provided by the host DSH at runtime
 npm run build && npm run build --prefix browser   # bundle src/ → lib/ (both packages)
-npm test                          # vitest (103 tests)
+npm test                          # vitest (106 tests)
 npm run typecheck                 # tsc against the local @deepseek-ai/* stubs
 DSH_HOST=/path/to/deepseek-harness npm run typecheck:host   # strict check against the real host types
 ```
@@ -225,7 +225,7 @@ DSH_HOST=/path/to/deepseek-harness npm run typecheck:host   # strict check again
 
 ```sh
 npm pack                                   # → dsh-web-automation-0.3.0.tgz
-dsh plugin --profile tui add ./dsh-web-automation-0.3.0.tgz
+dsh plugin --profile web add ./dsh-web-automation-0.3.0.tgz
 ```
 
 ## Troubleshooting
@@ -234,6 +234,7 @@ dsh plugin --profile tui add ./dsh-web-automation-0.3.0.tgz
 |---|---|---|
 | `ERESOLVE` peer conflict on install | Peer deps absent outside DSH deployment | `npm install --legacy-peer-deps` |
 | `Cannot find module '@deepseek-ai/...'` | Plugin installed without DSH's packages | Install DSH first (peers resolve to host's versions) |
+| `does not provide an export named 'installSettingsSection'` | Plugin built against an older DSH settings API | Update the plugin (current DSH uses `ctx.settings.installSection`) and reinstall |
 | `WEB_PROVIDER_AMBIGUOUS` at startup | The `web` seam sees two usable search providers | Add the `web` seam pin row (`searchProvider: multi`, `fetchProvider: cached-http`) — see the overlay |
 | `WEB_DUPLICATE_PROVIDER` at startup | Both the plugin and DSH's built-in web packages are loaded | Keep one — remove the built-in rows (or the plugin row); see "Relationship to DSH's built-in web packages" |
 | `web_fetch` blocked (SSRF) | Target is loopback/private/link-local | Set `fetch.allowPrivateNetworks: true` (trusted env only) |

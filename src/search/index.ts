@@ -16,7 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import { WebError } from '@deepseek-ai/dsh-web'
 import { WebStore } from '../store/index.ts'
@@ -44,7 +44,7 @@ export const name = 'web-search-multi'
 export const inject = ['web']
 
 /** Settings namespace carrying the multi-engine search configuration. */
-export const WEB_SEARCH_MULTI_SETTINGS_NAMESPACE = settingsNamespace('web-search-multi')
+export const WEB_SEARCH_MULTI_SETTINGS_NAMESPACE = 'web-search-multi'
 
 /** Engine-specific config blocks. */
 export interface EngineConfig {
@@ -237,11 +237,13 @@ export function apply(ctx: Context, config: Config, options: ApplyOptions = {}):
   // registration carries no resolved value: the provider is built once from
   // the current section, so a committed change needs no re-registration here.
   let current: () => Config = () => config
-  installSettingsSection(ctx, WEB_SEARCH_MULTI_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source: () => Config) => {
-      current = source
-    },
-    onChange: () => {},
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, WEB_SEARCH_MULTI_SETTINGS_NAMESPACE, Config, config, {
+      setSource: (source: () => Config) => {
+        current = source
+      },
+      onChange: () => {},
+    })
   })
   // schemastery (Config) has already filled every defaulted field.
   const resolved = current() as ResolvedConfig

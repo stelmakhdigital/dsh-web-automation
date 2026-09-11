@@ -67,6 +67,8 @@ declare module '@deepseek-ai/cordis' {
     get<T = any>(key: string): T | undefined
     /** Inject named dependencies and run the callback with the extended context. */
     inject(keys: string[], fn: (ctx: Context) => void): void
+    /** User-settings seam; present after `ctx.inject(['settings'], ...)`. */
+    settings: import('@deepseek-ai/dsh-settings').SettingsProvider
     /**
      * Register a lifecycle effect on the current fiber; the disposer(s) run
      * when the fiber is disposed (HMR / context teardown).
@@ -119,8 +121,14 @@ declare module '@deepseek-ai/dsh-launch-environment' {
 }
 
 declare module '@deepseek-ai/dsh-settings' {
-  export function installSettingsSection(ctx: any, ns: string, schema: any, entry: any, hooks: any): void
-  export function settingsNamespace(ns: string): string
+  export interface SettingsSectionHooks<T = any> {
+    setSource(current: () => T): void
+    onChange(): void
+    validate?: (value: T) => void
+  }
+  export interface SettingsProvider {
+    installSection(owner: any, ns: string, schema: any, entry: any, hooks: SettingsSectionHooks): void
+  }
 }
 
 declare module '@deepseek-ai/dsh-timeout' {

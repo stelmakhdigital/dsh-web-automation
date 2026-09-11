@@ -1,4 +1,7 @@
 node_modules/
+.pnpm-store/
+pnpm-lock.yaml
+pnpm-workspace.yaml
 *.log
 .DS_Store
 package-lock.json

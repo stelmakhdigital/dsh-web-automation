@@ -1,5 +1,4 @@
 // src/index.ts
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
 import z2 from "@deepseek-ai/schemastery";
 
 // src/runtime.ts
@@ -866,7 +865,7 @@ function registerBrowserTools(ctx, options) {
 // src/index.ts
 var name = "web-browser";
 var inject = ["tools", "systemPrompt"];
-var WEB_BROWSER_SETTINGS_NAMESPACE = settingsNamespace("web-browser");
+var WEB_BROWSER_SETTINGS_NAMESPACE = "web-browser";
 var DEFAULT_BROWSER_TIMEOUT_MS = 3e4;
 var DEFAULT_BROWSER_MAX_TEXT_LENGTH = 2e4;
 var DEFAULT_BROWSER_MAX_ELEMENTS = 200;
@@ -887,12 +886,14 @@ function assertPositiveInteger(name2, value) {
 }
 function apply(ctx, config) {
   let current = () => config;
-  installSettingsSection(ctx, WEB_BROWSER_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source) => {
-      current = source;
-    },
-    onChange: () => {
-    }
+  ctx.inject(["settings"], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, WEB_BROWSER_SETTINGS_NAMESPACE, Config, config, {
+      setSource: (source) => {
+        current = source;
+      },
+      onChange: () => {
+      }
+    });
   });
   const resolved = current();
   assertPositiveInteger("timeoutMs", resolved.timeoutMs);

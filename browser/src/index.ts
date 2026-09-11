@@ -8,7 +8,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import BrowserRuntime from './runtime.ts'
 import { PlaywrightProvider } from './playwright.ts'
@@ -41,7 +41,7 @@ export const name = 'web-browser'
 export const inject = ['tools', 'systemPrompt']
 
 /** Settings namespace carrying the browser automation configuration. */
-export const WEB_BROWSER_SETTINGS_NAMESPACE = settingsNamespace('web-browser')
+export const WEB_BROWSER_SETTINGS_NAMESPACE = 'web-browser'
 
 /** Default cooperative per-action timeout budget (ms). */
 export const DEFAULT_BROWSER_TIMEOUT_MS = 30_000
@@ -113,11 +113,13 @@ export function apply(ctx: Context, config: Config): void {
   // is built once from the current section, so a committed change needs no
   // re-registration here.
   let current: () => Config = () => config
-  installSettingsSection(ctx, WEB_BROWSER_SETTINGS_NAMESPACE, Config, config, {
-    setSource: (source: () => Config) => {
-      current = source
-    },
-    onChange: () => {},
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, WEB_BROWSER_SETTINGS_NAMESPACE, Config, config, {
+      setSource: (source: () => Config) => {
+        current = source
+      },
+      onChange: () => {},
+    })
   })
   const resolved = current() as ResolvedConfig
   assertPositiveInteger('timeoutMs', resolved.timeoutMs)

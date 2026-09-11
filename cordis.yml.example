@@ -4,7 +4,7 @@
 #    shipped local-web.cordis.yml overlay is applied automatically, so the
 #    rows below are what that overlay adds):
 #
-#       dsh plugin --profile tui add git+https://github.com/stelmakhdigital/dsh-web-automation.git
+#       dsh plugin --profile web add git+https://github.com/stelmakhdigital/dsh-web-automation.git
 #
 #    Manual alternative: add the rows below to your profile's cordis.yml
 #    (or an overlay applied with `dsh --profile <name> --patch ...`). Every
@@ -23,8 +23,8 @@
 #
 #       git clone --depth 1 https://github.com/stelmakhdigital/dsh-web-automation.git
 #       cd <clone> && npm pack ./browser
-#       dsh plugin --profile tui add ./dsh-web-browser-0.3.0.tgz
-#       dsh plugin --profile tui exec playwright install chromium
+#       dsh plugin --profile web add ./dsh-web-browser-0.3.0.tgz
+#       dsh plugin --profile web exec playwright install chromium
 #
 #    Its bundle patch adds the `web-browser` row at the bottom of this file.
 #
